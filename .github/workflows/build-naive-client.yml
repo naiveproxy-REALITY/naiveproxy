@@ -1,0 +1,124 @@
+# Minimal CI to build the NaiveProxy-REALITY client (linux x64, debug) for
+# stress testing. Based on the author's .github/workflows/build.yml linux job,
+# trimmed to a single arch + the fast debug config (no PGO, component build).
+# The author's full build.yml is left untouched.
+#
+# Trigger: push to a build-naive-* branch, or manually (workflow_dispatch).
+# Output: src/out/Debug/naive uploaded as an artifact.
+#
+# NOTE: your REALITY/UoT changes must be COMMITTED on the pushed branch;
+# CI checks out committed code only.
+
+name: build-naive-client
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "build.sh mode"
+        default: "debug"
+        type: choice
+        options: [debug, release]
+  push:
+    branches: ["build-naive-*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CACHE_EPOCH: 1
+  CCACHE_MAXSIZE: 400M
+  CCACHE_MAXFILES: 0
+
+defaults:
+  run:
+    shell: bash
+    working-directory: src
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    env:
+      EXTRA_FLAGS: 'target_cpu="x64"'
+      BUILD_MODE: ${{ github.event.inputs.build_mode || 'debug' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache toolchains (clang, gn)
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/third_party/llvm-build/Release+Asserts/
+            src/gn/
+            src/qemu-user*.deb
+          key: toolchains-posix-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
+
+      - name: Cache PGO profiles
+        uses: actions/cache@v4
+        with:
+          path: src/chrome/build/pgo_profiles/
+          key: pgo-linux-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
+
+      - name: Regenerate Debian keyring
+        run: |
+          rm -f ./build/linux/sysroot_scripts/keyring.gpg
+          GPG_TTY=/dev/null ./build/linux/sysroot_scripts/generate_keyring.sh
+
+      - name: Cache sysroot
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/out/sysroot-build/bullseye/bullseye_*
+            src/out/sysroot-build/trixie/trixie_*
+            src/out/sysroot-build/sid/sid_*
+          key: sysroot-linux-x64-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
+
+      - id: ccache-timestamp
+        run: echo "CCACHE_TIMESTAMP=$(date +%s)" >>"$GITHUB_OUTPUT"
+
+      - name: Cache ccache files
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-x64-${{ hashFiles('CHROMIUM_VERSION') }}-${{ steps.ccache-timestamp.outputs.CCACHE_TIMESTAMP }}
+          restore-keys: ccache-linux-x64-${{ hashFiles('CHROMIUM_VERSION') }}-
+
+      - name: Install APT packages
+        run: |
+          sudo apt update
+          sudo apt install -y ninja-build pkg-config ccache bubblewrap
+
+      - run: ./get-clang.sh
+      - run: ccache -z || true
+      - name: Build naive (${{ env.BUILD_MODE }})
+        run: |
+          if [ "$BUILD_MODE" = release ]; then
+            ./build.sh
+          else
+            ./build.sh debug
+          fi
+      - run: ccache -s || true
+
+      - name: Locate binary
+        id: bin
+        run: |
+          if [ "$BUILD_MODE" = release ]; then
+            echo "path=src/out/Release/naive" >>"$GITHUB_OUTPUT"
+          else
+            echo "path=src/out/Debug/naive" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Smoke check binary
+        run: |
+          out="out/${BUILD_MODE^}"   # Debug or Release
+          ls -lh "$out/naive"
+          file "$out/naive" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naive-linux-x64-${{ env.BUILD_MODE }}-${{ github.sha }}
+          path: ${{ steps.bin.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14

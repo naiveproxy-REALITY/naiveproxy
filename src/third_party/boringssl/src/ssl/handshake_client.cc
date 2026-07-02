@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <utility>
@@ -26,10 +27,12 @@
 #include <openssl/aead.h>
 #include <openssl/bn.h>
 #include <openssl/bytestring.h>
+#include <openssl/curve25519.h>
 #include <openssl/ec_key.h>
 #include <openssl/ecdsa.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/hkdf.h>
 #include <openssl/hpke.h>
 #include <openssl/md5.h>
 #include <openssl/mem.h>
@@ -216,6 +219,119 @@ bool ssl_write_client_hello_without_extensions(const SSL_HANDSHAKE *hs,
   return true;
 }
 
+// Core of the REALITY client session-id encryption. All key material lives in
+// the caller's cleansed stack buffers so the wrapper can guarantee they are
+// zeroed on every return path (see reality_encrypt_client_session_id).
+static bool reality_encrypt_client_session_id_inner(SSL_HANDSHAKE *hs,
+                                                    Array<uint8_t> *msg,
+                                                    uint8_t priv_key[32],
+                                                    uint8_t auth_key[32],
+                                                    uint8_t plaintext[16]) {
+  SSL *const ssl = hs->ssl;
+
+  // REALITY authenticates using the client's X25519 private key. This may come
+  // either from a plain X25519 key share or from the X25519 component of the
+  // post-quantum hybrid X25519MLKEM768 key share (both expose it via
+  // RealityX25519PrivateKey). Prefer plain X25519 if offered, else the hybrid.
+  bool found = false;
+  for (const auto &ks : hs->key_shares) {
+    if (ks->GroupID() == SSL_GROUP_X25519 &&
+        ks->RealityX25519PrivateKey(priv_key)) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    for (const auto &ks : hs->key_shares) {
+      if (ks->GroupID() == SSL_GROUP_X25519_MLKEM768 &&
+          ks->RealityX25519PrivateKey(priv_key)) {
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+
+  if (!X25519(auth_key, priv_key,
+              ssl->config->reality_server_public_key)) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+
+  static const uint8_t kInfo[] = {'R', 'E', 'A', 'L', 'I', 'T', 'Y'};
+  if (!HKDF(auth_key, 32, EVP_sha256(),
+            auth_key, 32,
+            ssl->s3->client_random, 20,
+            kInfo, sizeof(kInfo))) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+
+  OPENSSL_memcpy(plaintext, ssl->config->reality_version, 3);
+  plaintext[3] = 0;
+  uint32_t now = (uint32_t)time(nullptr);
+  plaintext[4] = (now >> 24) & 0xff;
+  plaintext[5] = (now >> 16) & 0xff;
+  plaintext[6] = (now >> 8) & 0xff;
+  plaintext[7] = now & 0xff;
+  OPENSSL_memcpy(plaintext + 8, ssl->config->reality_short_id, 8);
+
+  uint8_t *data = msg->data();
+  size_t len = msg->size();
+  if (len < 39 + 32 || data[38] != 32) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+
+  Array<uint8_t> aad;
+  if (!aad.CopyFrom(Span(data, len))) {
+    return false;
+  }
+  OPENSSL_memset(aad.data() + 39, 0, 32);
+
+  uint8_t nonce[12];
+  OPENSSL_memcpy(nonce, ssl->s3->client_random + 20, 12);
+
+  uint8_t ciphertext[32];
+  ScopedEVP_AEAD_CTX aead_ctx;
+  if (!EVP_AEAD_CTX_init(aead_ctx.get(), EVP_aead_aes_256_gcm(),
+                         auth_key, 32, 0, nullptr)) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+  size_t out_len = 0;
+  if (!EVP_AEAD_CTX_seal(aead_ctx.get(), ciphertext, &out_len,
+                         sizeof(ciphertext), nonce, 12,
+                         plaintext, 16, aad.data(), len) ||
+      out_len != 32) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+
+  OPENSSL_memcpy(data + 39, ciphertext, 32);
+  hs->session_id.CopyFrom(Span(ciphertext, 32));
+  return true;
+}
+
+static bool reality_encrypt_client_session_id(SSL_HANDSHAKE *hs,
+                                              Array<uint8_t> *msg) {
+  // Sensitive key material is confined to these buffers so we can guarantee
+  // it is wiped on every return path (defense against memory disclosure).
+  uint8_t priv_key[32];
+  uint8_t auth_key[32];
+  uint8_t plaintext[16];
+  bool ok =
+      reality_encrypt_client_session_id_inner(hs, msg, priv_key, auth_key,
+                                              plaintext);
+  OPENSSL_cleanse(priv_key, sizeof(priv_key));
+  OPENSSL_cleanse(auth_key, sizeof(auth_key));
+  OPENSSL_cleanse(plaintext, sizeof(plaintext));
+  return ok;
+}
+
 bool ssl_add_client_hello(SSL_HANDSHAKE *hs) {
   SSL *const ssl = hs->ssl;
   ScopedCBB cbb;
@@ -229,6 +345,11 @@ bool ssl_add_client_hello(SSL_HANDSHAKE *hs) {
                                                  /*empty_session_id=*/false) ||
       !ssl_add_clienthello_tlsext(hs, &body, /*out_encoded=*/nullptr, type) ||
       !ssl->method->finish_message(ssl, cbb.get(), &msg)) {
+    return false;
+  }
+
+  if (ssl->config->reality_client_enabled &&
+      !reality_encrypt_client_session_id(hs, &msg)) {
     return false;
   }
 

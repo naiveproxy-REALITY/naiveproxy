@@ -901,6 +901,14 @@ class SSLKeyShare {
   // DeserializePrivateKey initializes the state of the key exchange from |in|,
   // returning true if successful and false otherwise.
   virtual bool DeserializePrivateKey(CBS *in) { return false; }
+
+  // RealityX25519PrivateKey copies this key share's raw X25519 private scalar
+  // into |out| (32 bytes) for REALITY client authentication, returning true if
+  // this group carries an X25519 component. Only X25519 and X25519MLKEM768
+  // implement it; all other groups return false. This exists so the REALITY
+  // client patch can authenticate regardless of whether the offered group is
+  // plain X25519 or the post-quantum hybrid X25519MLKEM768.
+  virtual bool RealityX25519PrivateKey(uint8_t out[32]) { return false; }
 };
 
 struct NamedGroup {
@@ -3524,6 +3532,14 @@ struct SSL_CONFIG {
   // alps_use_new_codepoint if set indicates we use new ALPS extension codepoint
   // to negotiate and convey application settings.
   bool alps_use_new_codepoint : 1;
+
+  // REALITY client config. When reality_client_enabled is true, the
+  // ClientHello session_id is replaced with encrypted auth data before
+  // the message is sent and added to the transcript.
+  bool reality_client_enabled = false;
+  uint8_t reality_server_public_key[32] = {0};
+  uint8_t reality_short_id[8] = {0};
+  uint8_t reality_version[3] = {0};
 };
 
 // From RFC 8446, used in determining PSK modes.

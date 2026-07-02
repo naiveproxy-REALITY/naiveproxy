@@ -3154,6 +3154,19 @@ void SSL_set_permute_extensions(SSL *ssl, int enabled) {
   ssl->config->permute_extensions = !!enabled;
 }
 
+int SSL_set_reality_client_config(SSL *ssl, const uint8_t server_public_key[32],
+                                  const uint8_t short_id[8],
+                                  const uint8_t version[3]) {
+  if (!ssl->config) {
+    return 0;
+  }
+  ssl->config->reality_client_enabled = true;
+  OPENSSL_memcpy(ssl->config->reality_server_public_key, server_public_key, 32);
+  OPENSSL_memcpy(ssl->config->reality_short_id, short_id, 8);
+  OPENSSL_memcpy(ssl->config->reality_version, version, 3);
+  return 1;
+}
+
 int32_t SSL_get_ticket_age_skew(const SSL *ssl) {
   return ssl->s3->ticket_age_skew;
 }

@@ -34,6 +34,7 @@ constexpr base::TimeDelta kIdleCheckPeriod = base::Minutes(1);
 
 NaiveProxy::Tunnel::Tunnel() = default;
 NaiveProxy::Tunnel::~Tunnel() = default;
+NaiveProxy::PendingSocks5::~PendingSocks5() = default;
 
 NaiveProxy::NaiveProxy(std::unique_ptr<ServerSocket> listen_socket,
                        ClientProtocol protocol,
@@ -197,12 +198,33 @@ int NaiveProxy::DoConnect() {
   // Once accepted_socket_ is moved, the next Accept can start.
   next_state_ = State::kAccept;
 
-  std::unique_ptr<StreamSocket> socket;
   if (protocol_ == ClientProtocol::kSocks5) {
-    socket = std::make_unique<Socks5ServerSocket>(std::move(accepted_socket_),
-                                                  listen_user_, listen_pass_,
-                                                  traffic_annotation_);
-  } else if (protocol_ == ClientProtocol::kHttp) {
+    // For SOCKS5, do the handshake ourselves to detect UDP ASSOCIATE
+    // before deciding between NaiveConnection (TCP) and NaiveUdpConnection (UDP).
+    unsigned int id = next_id_++;
+    auto socks5_socket = std::make_unique<Socks5ServerSocket>(
+        std::move(accepted_socket_), listen_user_, listen_pass_,
+        traffic_annotation_);
+
+    auto pending = std::make_unique<PendingSocks5>();
+    pending->socket = std::move(socks5_socket);
+    pending->nak = tunnels_[id % concurrency_].nak;
+
+    Socks5ServerSocket* socket_ptr = pending->socket.get();
+    pending_socks5_[id] = std::move(pending);
+
+    int rv = socket_ptr->Connect(
+        base::BindOnce(&NaiveProxy::OnSocks5HandshakeComplete,
+                       weak_ptr_factory_.GetWeakPtr(), id));
+    if (rv == ERR_IO_PENDING) {
+      return OK;
+    }
+    OnSocks5HandshakeComplete(id, rv);
+    return OK;
+  }
+
+  std::unique_ptr<StreamSocket> socket;
+  if (protocol_ == ClientProtocol::kHttp) {
     socket = std::make_unique<HttpProxyServerSocket>(
         std::move(accepted_socket_), listen_user_, listen_pass_,
         negotiated_client_padding.get(), traffic_annotation_,
@@ -290,6 +312,121 @@ void NaiveProxy::Close(unsigned int connection_id, int reason) {
   connection_by_id_.erase(it);
 }
 
+void NaiveProxy::OnSocks5HandshakeComplete(unsigned int connection_id,
+                                            int result) {
+  auto it = pending_socks5_.find(connection_id);
+  if (it == pending_socks5_.end()) {
+    return;
+  }
+
+  auto pending = std::move(it->second);
+  pending_socks5_.erase(it);
+
+  if (result != OK) {
+    LOG(WARNING) << "SOCKS5 handshake failed for connection " << connection_id
+                 << ": " << ErrorToShortString(result);
+    return;
+  }
+
+  if (pending->socket->is_udp_associate()) {
+    // UDP ASSOCIATE: take UDP relay socket + TCP control socket.
+    auto udp_relay = pending->socket->TakeUdpRelaySocket();
+    auto control_socket =
+        std::unique_ptr<StreamSocket>(std::move(pending->socket));
+
+    auto udp_conn = std::make_unique<NaiveUdpConnection>(
+        connection_id, std::move(udp_relay), std::move(control_socket),
+        proxy_info_, session_, pending->nak, net_log_, traffic_annotation_);
+    auto* conn_ptr = udp_conn.get();
+    udp_connection_by_id_[connection_id] = std::move(udp_conn);
+
+    int rv = conn_ptr->Connect(
+        base::BindOnce(&NaiveProxy::OnUdpConnectComplete,
+                       weak_ptr_factory_.GetWeakPtr(), connection_id));
+    if (rv == ERR_IO_PENDING) {
+      return;
+    }
+    HandleUdpConnectResult(conn_ptr, rv);
+  } else {
+    // TCP CONNECT: pass already-connected Socks5ServerSocket to NaiveConnection.
+    auto negotiated_padding = std::make_unique<PaddingType>(PaddingType::kNone);
+    auto connection_ptr = std::make_unique<NaiveConnection>(
+        connection_id, protocol_, std::move(negotiated_padding), proxy_info_,
+        resolver_, session_, pending->nak, net_log_,
+        std::move(pending->socket), traffic_annotation_);
+    auto* connection = connection_ptr.get();
+    connection_by_id_[connection_id] = std::move(connection_ptr);
+
+    int rv = connection->Connect(
+        base::BindOnce(&NaiveProxy::OnConnectComplete,
+                       weak_ptr_factory_.GetWeakPtr(), connection_id));
+    if (rv == ERR_IO_PENDING) {
+      return;
+    }
+    HandleConnectResult(connection, rv);
+  }
+}
+
+void NaiveProxy::OnUdpConnectComplete(unsigned int connection_id, int result) {
+  auto* conn = FindUdpConnection(connection_id);
+  if (!conn) {
+    return;
+  }
+  HandleUdpConnectResult(conn, result);
+}
+
+void NaiveProxy::HandleUdpConnectResult(NaiveUdpConnection* conn, int result) {
+  if (result != OK) {
+    CloseUdp(conn->id(), result);
+    return;
+  }
+  DoRunUdp(conn);
+}
+
+void NaiveProxy::DoRunUdp(NaiveUdpConnection* conn) {
+  int result = conn->Run(base::BindOnce(&NaiveProxy::OnUdpRunComplete,
+                                        weak_ptr_factory_.GetWeakPtr(),
+                                        conn->id()));
+  if (result == ERR_IO_PENDING) {
+    return;
+  }
+  HandleUdpRunResult(conn, result);
+}
+
+void NaiveProxy::OnUdpRunComplete(unsigned int connection_id, int result) {
+  auto* conn = FindUdpConnection(connection_id);
+  if (!conn) {
+    return;
+  }
+  HandleUdpRunResult(conn, result);
+}
+
+void NaiveProxy::HandleUdpRunResult(NaiveUdpConnection* conn, int result) {
+  CloseUdp(conn->id(), result);
+}
+
+void NaiveProxy::CloseUdp(unsigned int connection_id, int reason) {
+  auto it = udp_connection_by_id_.find(connection_id);
+  if (it == udp_connection_by_id_.end()) {
+    return;
+  }
+
+  LOG(INFO) << "UoT connection " << connection_id
+            << " closed: " << ErrorToShortString(reason);
+
+  base::SingleThreadTaskRunner::GetCurrentDefault()->DeleteSoon(
+      FROM_HERE, std::move(it->second));
+  udp_connection_by_id_.erase(it);
+}
+
+NaiveUdpConnection* NaiveProxy::FindUdpConnection(unsigned int connection_id) {
+  auto it = udp_connection_by_id_.find(connection_id);
+  if (it == udp_connection_by_id_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
 NaiveConnection* NaiveProxy::FindConnection(unsigned int connection_id) {
   auto it = connection_by_id_.find(connection_id);
   if (it == connection_by_id_.end()) {
@@ -341,6 +478,7 @@ bool NaiveProxy::WillCreateSession(const NetworkAnonymizationKey& nak) const {
 
 void NaiveProxy::CleanUpIdleConnections() {
   std::vector<NaiveConnection*> idle_conns;
+  std::vector<NaiveUdpConnection*> idle_udp_conns;
   base::TimeTicks now = base::TimeTicks::Now();
   for (const auto& [id, conn] : connection_by_id_) {
     base::TimeDelta idle = now - conn->GetLastWriteTime();
@@ -349,7 +487,17 @@ void NaiveProxy::CleanUpIdleConnections() {
       idle_conns.push_back(conn.get());
     }
   }
+  for (const auto& [id, conn] : udp_connection_by_id_) {
+    base::TimeDelta idle = now - conn->GetLastWriteTime();
+    base::TimeDelta age = now - conn->GetCreationTime();
+    if (idle > idle_timeout_ || age > tunnel_timeout_) {
+      idle_udp_conns.push_back(conn.get());
+    }
+  }
   for (NaiveConnection* conn : idle_conns) {
+    conn->Disconnect();
+  }
+  for (NaiveUdpConnection* conn : idle_udp_conns) {
     conn->Disconnect();
   }
   session_->CloseIdleConnections("Rotate old tunnels");

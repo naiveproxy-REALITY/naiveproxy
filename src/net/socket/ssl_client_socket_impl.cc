@@ -672,9 +672,14 @@ int SSLClientSocketImpl::Init() {
   //
   // TODO(rsleevi): Should this code allow hostnames that violate the LDH rule?
   // See https://crbug.com/496472 and https://crbug.com/496468 for discussion.
-  if (!host_is_ip_address &&
-      !SSL_set_tlsext_host_name(ssl_.get(), host_and_port_.host().c_str())) {
-    return ERR_UNEXPECTED;
+  if (!host_is_ip_address) {
+    const std::string& sni_host = ssl_config_.reality.enabled &&
+                                          !ssl_config_.reality.server_name.empty()
+                                      ? ssl_config_.reality.server_name
+                                      : host_and_port_.host();
+    if (!SSL_set_tlsext_host_name(ssl_.get(), sni_host.c_str())) {
+      return ERR_UNEXPECTED;
+    }
   }
 
   const std::vector<uint16_t> supported_groups =
@@ -691,7 +696,7 @@ int SSLClientSocketImpl::Init() {
     return ERR_UNEXPECTED;
   }
 
-  if (IsCachingEnabled()) {
+  if (IsCachingEnabled() && !ssl_config_.reality.enabled) {
     initial_session_cache_generation_number_ =
         context_->ssl_client_session_cache()->generation_number();
 
@@ -846,24 +851,41 @@ int SSLClientSocketImpl::Init() {
         host_and_port_, &client_cert_, &client_private_key_);
   }
 
-  if (context_->config().ech_enabled) {
-    // TODO(crbug.com/41482204): Enable this unconditionally.
-    SSL_set_enable_ech_grease(ssl_.get(), 1);
-  }
-  if (!ssl_config_.ech_config_list.empty()) {
-    DCHECK(context_->config().ech_enabled);
-    net_log_.AddEvent(NetLogEventType::SSL_ECH_CONFIG_LIST, [&] {
-      return base::DictValue().Set(
-          "bytes", NetLogBinaryValue(ssl_config_.ech_config_list));
-    });
-    if (!SSL_set1_ech_config_list(ssl_.get(),
-                                  ssl_config_.ech_config_list.data(),
-                                  ssl_config_.ech_config_list.size())) {
-      return ERR_INVALID_ECH_CONFIG_LIST;
+  if (!ssl_config_.reality.enabled) {
+    if (context_->config().ech_enabled) {
+      // TODO(crbug.com/41482204): Enable this unconditionally.
+      SSL_set_enable_ech_grease(ssl_.get(), 1);
     }
+    if (!ssl_config_.ech_config_list.empty()) {
+      DCHECK(context_->config().ech_enabled);
+      net_log_.AddEvent(NetLogEventType::SSL_ECH_CONFIG_LIST, [&] {
+        return base::DictValue().Set(
+            "bytes", NetLogBinaryValue(ssl_config_.ech_config_list));
+      });
+      if (!SSL_set1_ech_config_list(ssl_.get(),
+                                    ssl_config_.ech_config_list.data(),
+                                    ssl_config_.ech_config_list.size())) {
+        return ERR_INVALID_ECH_CONFIG_LIST;
+      }
+    }
+
+    SSL_set_permute_extensions(ssl_.get(), 1);
   }
 
-  SSL_set_permute_extensions(ssl_.get(), 1);
+  if (ssl_config_.reality.enabled) {
+    if (ssl_config_.reality.server_public_key.size() == 32 &&
+        ssl_config_.reality.short_id.size() == 8 &&
+        ssl_config_.reality.version.size() == 3) {
+      SSL_set_reality_client_config(
+          ssl_.get(),
+          ssl_config_.reality.server_public_key.data(),
+          ssl_config_.reality.short_id.data(),
+          ssl_config_.reality.version.data());
+      net_log_.AddEvent(NetLogEventType::SSL_CONNECTED, [&] {
+        return base::DictValue().Set("reality", true);
+      });
+    }
+  }
 
   // Configure BoringSSL to send Trust Anchor IDs, if provided.
   if (ssl_config_.trust_anchor_ids.has_value()) {
@@ -1239,7 +1261,7 @@ ssl_verify_result_t SSLClientSocketImpl::HandleVerifyResult() {
       // and map all bypassable errors to fatal ones.
       result = ERR_ECH_FALLBACK_CERTIFICATE_INVALID;
     }
-    if (ssl_config_.ignore_certificate_errors) {
+    if (ssl_config_.ignore_certificate_errors || ssl_config_.reality.enabled) {
       result = OK;
     }
   }

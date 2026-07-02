@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iostream>
 
+#include "base/base64.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
@@ -319,6 +320,49 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
 
   if (value.contains("no-post-quantum")) {
     no_post_quantum = true;
+  }
+
+  if (const base::Value* v = value.Find("reality")) {
+    if (const base::Value::Dict* rd = v->GetIfDict()) {
+      reality.enabled = true;
+      if (const std::string* s = rd->FindString("server_name")) {
+        reality.server_name = *s;
+      }
+      if (const std::string* s = rd->FindString("public_key")) {
+        std::string decoded;
+        if (base::Base64Decode(*s, &decoded) && decoded.size() == 32) {
+          reality.server_public_key.assign(decoded.begin(), decoded.end());
+        } else {
+          std::cerr << "Invalid reality.public_key (expected base64 32 bytes)"
+                    << std::endl;
+          return false;
+        }
+      }
+      if (const std::string* s = rd->FindString("short_id")) {
+        std::string decoded;
+        if (base::Base64Decode(*s, &decoded) && decoded.size() == 8) {
+          reality.short_id.assign(decoded.begin(), decoded.end());
+        } else {
+          std::cerr << "Invalid reality.short_id (expected base64 8 bytes)"
+                    << std::endl;
+          return false;
+        }
+      }
+      if (const base::Value::List* ver = rd->FindList("version")) {
+        if (ver->size() == 3) {
+          reality.version.resize(3);
+          for (size_t i = 0; i < 3; i++) {
+            auto val = (*ver)[i].GetIfInt();
+            if (!val || *val < 0 || *val > 255) {
+              std::cerr << "Invalid reality.version" << std::endl;
+              return false;
+            }
+            reality.version[i] = static_cast<uint8_t>(*val);
+          }
+        }
+      }
+      LOG(INFO) << "REALITY config: server_name=" << reality.server_name;
+    }
   }
 
   return true;

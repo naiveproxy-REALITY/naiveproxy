@@ -21,7 +21,9 @@
 #include "net/socket/connection_attempts.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/stream_socket.h"
+#include "net/socket/udp_server_socket.h"
 #include "net/ssl/ssl_info.h"
+#include "net/tools/naive/naive_uot_framer.h"
 
 namespace net {
 struct NetworkTrafficAnnotationTag;
@@ -42,6 +44,18 @@ class Socks5ServerSocket : public StreamSocket {
   Socks5ServerSocket& operator=(const Socks5ServerSocket&) = delete;
 
   const HostPortPair& request_endpoint() const;
+
+  // Returns true if the SOCKS5 command was UDP ASSOCIATE.
+  bool is_udp_associate() const { return is_udp_associate_; }
+
+  // Takes ownership of the UDP relay socket. Only valid after Connect()
+  // completes when is_udp_associate() is true.
+  std::unique_ptr<UDPServerSocket> TakeUdpRelaySocket() {
+    return std::move(udp_relay_socket_);
+  }
+
+  // Returns the local address of the UDP relay socket.
+  const IPEndPoint& udp_relay_address() const { return udp_relay_address_; }
 
   // StreamSocket implementation.
 
@@ -154,6 +168,11 @@ class Socks5ServerSocket : public StreamSocket {
   uint8_t reply_;
 
   HostPortPair request_endpoint_;
+
+  // UDP ASSOCIATE support.
+  bool is_udp_associate_ = false;
+  std::unique_ptr<UDPServerSocket> udp_relay_socket_;
+  IPEndPoint udp_relay_address_;
 
   NetLogWithSource net_log_;
 

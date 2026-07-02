@@ -189,6 +189,11 @@ class X25519KeyShare : public SSLKeyShare {
     return true;
   }
 
+  bool RealityX25519PrivateKey(uint8_t out[32]) override {
+    OPENSSL_memcpy(out, private_key_, sizeof(private_key_));
+    return true;
+  }
+
  private:
   uint8_t private_key_[32];
 };
@@ -367,6 +372,11 @@ class X25519MLKEM768KeyShare : public SSLKeyShare {
     }
 
     *out_secret = std::move(secret);
+    return true;
+  }
+
+  bool RealityX25519PrivateKey(uint8_t out[32]) override {
+    OPENSSL_memcpy(out, x25519_private_key_, sizeof(x25519_private_key_));
     return true;
   }
 

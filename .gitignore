@@ -7,3 +7,4 @@ src/out/
 src/.host_tool_cache/
 .vscode/
 *.pyc
+/src/build/linux/debian_bullseye_arm64-sysroot/

@@ -47,4 +47,16 @@ int SSLConfig::GetCertVerifyFlags() const {
   return flags;
 }
 
+namespace {
+SSLConfig::RealityConfig g_global_reality_config;
+}
+
+void SetGlobalRealityConfig(const SSLConfig::RealityConfig& config) {
+  g_global_reality_config = config;
+}
+
+const SSLConfig::RealityConfig& GetGlobalRealityConfig() {
+  return g_global_reality_config;
+}
+
 }  // namespace net

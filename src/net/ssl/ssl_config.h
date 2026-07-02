@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "base/containers/flat_map.h"
 #include "base/memory/scoped_refptr.h"
@@ -38,6 +40,16 @@ NET_EXPORT extern const uint16_t kDefaultSSLVersionMax;
 // A collection of SSL-related configuration settings.
 struct NET_EXPORT SSLConfig {
   using ApplicationSettings = base::flat_map<NextProto, std::vector<uint8_t>>;
+
+  // REALITY client configuration. When |enabled| is true, the TLS
+  // ClientHello's legacy session_id is replaced with encrypted auth data.
+  struct NET_EXPORT RealityConfig {
+    bool enabled = false;
+    std::string server_name;                 // SNI dest domain (e.g. "www.microsoft.com")
+    std::vector<uint8_t> server_public_key;  // X25519 public key (32 bytes)
+    std::vector<uint8_t> short_id;           // 8-byte auth token
+    std::vector<uint8_t> version;            // 3-byte client version
+  };
 
   SSLConfig();
   SSLConfig(const SSLConfig& other);
@@ -174,7 +186,14 @@ struct NET_EXPORT SSLConfig {
   // enough to implement the extension and can process the server's list of
   // available trust anchors.
   std::optional<std::vector<uint8_t>> trust_anchor_ids;
+
+  // REALITY client configuration.
+  RealityConfig reality;
 };
+
+// Global REALITY configuration (NaiveProxy uses a single proxy config).
+NET_EXPORT void SetGlobalRealityConfig(const SSLConfig::RealityConfig& config);
+NET_EXPORT const SSLConfig::RealityConfig& GetGlobalRealityConfig();
 
 }  // namespace net
 

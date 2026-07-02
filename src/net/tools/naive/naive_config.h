@@ -20,6 +20,7 @@
 #include "net/base/ip_address.h"
 #include "net/base/proxy_chain.h"
 #include "net/http/http_request_headers.h"
+#include "net/ssl/ssl_config.h"
 #include "net/tools/naive/naive_protocol.h"
 #include "url/scheme_host_port.h"
 
@@ -71,6 +72,9 @@ struct NaiveConfig {
   base::FilePath ssl_key_log_file;
 
   std::optional<bool> no_post_quantum;
+
+  // REALITY client configuration.
+  SSLConfig::RealityConfig reality;
 
   NaiveConfig();
   NaiveConfig(const NaiveConfig&);

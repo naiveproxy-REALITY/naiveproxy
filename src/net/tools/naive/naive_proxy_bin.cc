@@ -60,6 +60,7 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_server_socket.h"
 #include "net/socket/udp_server_socket.h"
+#include "net/ssl/ssl_config.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
@@ -425,8 +426,10 @@ int main(int argc, char* argv[]) {
                  "--resolver-range=...       Redirect resolver range\n"
                  "--log[=<path>]             Log to stderr, or file\n"
                  "--log-net-log=<path>       Save NetLog\n"
-                 "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
-                 "--no-post-quantum          No post-quantum key agreement\n"
+                  "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
+                  "--no-post-quantum          No post-quantum key agreement\n"
+                  "config.json also supports:\n"
+                  "  \"reality\": {\"server_name\":\"...\",\"public_key\":\"base64\",\"short_id\":\"base64\",\"version\":[1,0,0]}\n"
               << std::endl;
     exit(EXIT_SUCCESS);
   }
@@ -441,6 +444,11 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
   CHECK(logging::InitLogging(config.log));
+
+  if (config.reality.enabled) {
+    net::SetGlobalRealityConfig(config.reality);
+    LOG(INFO) << "REALITY enabled: server_name=" << config.reality.server_name;
+  }
 
   if (!config.ssl_key_log_file.empty()) {
     net::SSLClientSocket::SetSSLKeyLogger(

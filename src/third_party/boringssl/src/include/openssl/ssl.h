@@ -5290,6 +5290,17 @@ OPENSSL_EXPORT void SSL_CTX_set_select_certificate_cb(
     SSL_CTX *ctx,
     enum ssl_select_cert_result_t (*cb)(const SSL_CLIENT_HELLO *));
 
+// SSL_set_reality_client_config configures REALITY client authentication on
+// |ssl|. When set, the ClientHello's legacy session_id is replaced with
+// encrypted auth data (X25519+HKDF+AES-256-GCM) before the handshake message
+// is sent and added to the transcript. |server_public_key| is the REALITY
+// server's X25519 public key. |short_id| is an 8-byte auth token. |version|
+// is a 3-byte client version. This must be called before the handshake begins.
+// Returns 1 on success and 0 on error.
+OPENSSL_EXPORT int SSL_set_reality_client_config(
+    SSL *ssl, const uint8_t server_public_key[32],
+    const uint8_t short_id[8], const uint8_t version[3]);
+
 // SSL_CTX_set_dos_protection_cb sets a callback that is called once the
 // resumption decision for a ClientHello has been made. It can return one to
 // allow the handshake to continue or zero to cause the handshake to abort.

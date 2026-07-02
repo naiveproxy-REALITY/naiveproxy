@@ -19,6 +19,7 @@
 #include "net/ssl/ssl_config.h"
 #include "net/tools/naive/naive_connection.h"
 #include "net/tools/naive/naive_protocol.h"
+#include "net/tools/naive/naive_udp_connection.h"
 #include "net/tools/naive/preamble_getter.h"
 
 namespace net {
@@ -67,6 +68,12 @@ class NaiveProxy {
     std::unique_ptr<PreambleGetter> url_getter;
   };
 
+  struct PendingSocks5 {
+    ~PendingSocks5();
+    std::unique_ptr<Socks5ServerSocket> socket;
+    NetworkAnonymizationKey nak;
+  };
+
   void OnIOComplete(int result);
   int DoLoop(int last_io_result);
   int DoAccept();
@@ -77,13 +84,22 @@ class NaiveProxy {
   void OnConnectComplete(unsigned int connection_id, int result);
   void HandleConnectResult(NaiveConnection* connection, int result);
 
+  void OnSocks5HandshakeComplete(unsigned int connection_id, int result);
+  void OnUdpConnectComplete(unsigned int connection_id, int result);
+  void HandleUdpConnectResult(NaiveUdpConnection* conn, int result);
+  void DoRunUdp(NaiveUdpConnection* conn);
+  void OnUdpRunComplete(unsigned int connection_id, int result);
+  void HandleUdpRunResult(NaiveUdpConnection* conn, int result);
+
   void DoRun(NaiveConnection* connection);
   void OnRunComplete(unsigned int connection_id, int result);
   void HandleRunResult(NaiveConnection* connection, int result);
 
   void Close(unsigned int connection_id, int reason);
+  void CloseUdp(unsigned int connection_id, int reason);
 
   NaiveConnection* FindConnection(unsigned int connection_id);
+  NaiveUdpConnection* FindUdpConnection(unsigned int connection_id);
   NaiveProxyDelegate* naive_proxy_delegate() const;
   bool IsSessionCapable() const;
   bool WillCreateSession(const NetworkAnonymizationKey& nak) const;
@@ -112,6 +128,8 @@ class NaiveProxy {
   std::vector<Tunnel> tunnels_;
 
   std::map<unsigned int, std::unique_ptr<NaiveConnection>> connection_by_id_;
+  std::map<unsigned int, std::unique_ptr<PendingSocks5>> pending_socks5_;
+  std::map<unsigned int, std::unique_ptr<NaiveUdpConnection>> udp_connection_by_id_;
 
   const NetworkTrafficAnnotationTag& traffic_annotation_;
 

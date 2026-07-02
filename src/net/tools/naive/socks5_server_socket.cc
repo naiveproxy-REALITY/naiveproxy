@@ -541,7 +541,10 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
       // The proxy replies with success immediately without first connecting
       // to the requested endpoint.
       reply_ = kReplySuccess;
-    } else if (command == kCommandBind || command == kCommandUDPAssociate) {
+    } else if (command == kCommandUDPAssociate) {
+      is_udp_associate_ = true;
+      reply_ = kReplySuccess;
+    } else if (command == kCommandBind) {
       reply_ = kReplyCommandNotSupported;
     } else {
       net_log_.AddEventWithIntParams(NetLogEventType::SOCKS_UNEXPECTED_COMMAND,
@@ -597,6 +600,22 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
       IPEndPoint endpoint(ip_addr, port_host);
       request_endpoint_ = HostPortPair::FromIPEndPoint(endpoint);
     }
+
+    // For UDP ASSOCIATE: create UDP relay socket and set magic endpoint.
+    if (is_udp_associate_) {
+      udp_relay_socket_ =
+          std::make_unique<UDPServerSocket>(net_log_, NetLogSource());
+      IPEndPoint bind_addr(IPAddress(0, 0, 0, 0), 0);
+      int rv = udp_relay_socket_->Listen(bind_addr);
+      if (rv != OK) {
+        return rv;
+      }
+      udp_relay_socket_->GetLocalAddress(&udp_relay_address_);
+      // Set request endpoint to UoT magic address so NaiveProxy knows
+      // to create a UoT connection instead of a normal TCP connection.
+      request_endpoint_ = HostPortPair(kUotMagicAddress, 0);
+    }
+
     buffer_.clear();
     next_state_ = STATE_HANDSHAKE_WRITE;
     return OK;
@@ -611,16 +630,39 @@ int Socks5ServerSocket::DoHandshakeWrite() {
   next_state_ = STATE_HANDSHAKE_WRITE_COMPLETE;
 
   if (buffer_.empty()) {
-    buffer_ = {
-        // clang-format off
-        kSOCKS5Version,
-        reply_,
-        kSOCKS5Reserved,
-        kEndPointResolvedIPv4,
-        0x00, 0x00, 0x00, 0x00,  // BND.ADDR
-        0x00, 0x00,  // BND.PORT
-        // clang-format on
-    };
+    if (is_udp_associate_) {
+      // Reply with the UDP relay address.
+      const IPAddress& ip = udp_relay_address_.address();
+      uint16_t port_be = base::HostToNet16(udp_relay_address_.port());
+      if (ip.IsIPv4()) {
+        const auto bytes = ip.bytes();
+        buffer_ = {
+            kSOCKS5Version, reply_, kSOCKS5Reserved, kEndPointResolvedIPv4,
+        };
+        buffer_.insert(buffer_.end(), bytes.begin(), bytes.begin() + 4);
+        buffer_.push_back((port_be >> 8) & 0xff);
+        buffer_.push_back(port_be & 0xff);
+      } else {
+        const auto bytes = ip.bytes();
+        buffer_ = {
+            kSOCKS5Version, reply_, kSOCKS5Reserved, kEndPointResolvedIPv6,
+        };
+        buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
+        buffer_.push_back((port_be >> 8) & 0xff);
+        buffer_.push_back(port_be & 0xff);
+      }
+    } else {
+      buffer_ = {
+          // clang-format off
+          kSOCKS5Version,
+          reply_,
+          kSOCKS5Reserved,
+          kEndPointResolvedIPv4,
+          0x00, 0x00, 0x00, 0x00,  // BND.ADDR
+          0x00, 0x00,  // BND.PORT
+          // clang-format on
+      };
+    }
     bytes_sent_ = 0;
   }
 

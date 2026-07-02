@@ -207,6 +207,12 @@ ConnectJobParams CreateProxyParams(
     proxy_server_ssl_config.session_usage = SessionUsage::kProxy;
   }
 
+  // Apply global REALITY config if set.
+  const auto& reality = GetGlobalRealityConfig();
+  if (reality.enabled) {
+    proxy_server_ssl_config.reality = reality;
+  }
+
   // Create the nested parameters over which the connection to the proxy
   // will be made.
   ConnectJobParams params;
