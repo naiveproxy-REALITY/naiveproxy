@@ -324,7 +324,7 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
   }
 
   if (const base::Value* v = value.Find("reality")) {
-    if (const base::Value::Dict* rd = v->GetIfDict()) {
+    if (const base::DictValue* rd = v->GetIfDict()) {
       reality.enabled = true;
       if (const std::string* s = rd->FindString("server_name")) {
         reality.server_name = *s;
@@ -349,7 +349,7 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
           return false;
         }
       }
-      if (const base::Value::List* ver = rd->FindList("version")) {
+      if (const base::ListValue* ver = rd->FindList("version")) {
         if (ver->size() == 3) {
           reality.version.resize(3);
           for (size_t i = 0; i < 3; i++) {
