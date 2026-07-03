@@ -165,8 +165,11 @@ void NaiveUdpConnection::StartConnectServer() {
   url::SchemeHostPort endpoint("http", kUotMagicAddress, 0);
   server_socket_handle_ = std::make_unique<ClientSocketHandle>();
 
-  LOG(INFO) << "UoT conn " << id_ << " connecting H2 CONNECT via "
-            << proxy_info_.ToDebugString();
+  LOG(INFO) << "UoT conn " << id_ << " connecting H2 CONNECT to "
+            << endpoint.Serialize() << " valid=" << endpoint.IsValid()
+            << " via " << proxy_info_.ToDebugString()
+            << " is_direct=" << proxy_info_.is_direct()
+            << " session=" << (session_ != nullptr);
 
   int rv = InitSocketHandleForHttpRequest(
       std::move(endpoint), LOAD_IGNORE_LIMITS, MAXIMUM_PRIORITY, session_,
@@ -175,6 +178,8 @@ void NaiveUdpConnection::StartConnectServer() {
       net_log_, server_socket_handle_.get(), io_callback_,
       ClientSocketPool::ProxyAuthCallback());
 
+  LOG(INFO) << "UoT conn " << id_
+            << " InitSocketHandleForHttpRequest rv=" << rv;
   if (rv != ERR_IO_PENDING) {
     OnConnectServerComplete(rv);
   }
