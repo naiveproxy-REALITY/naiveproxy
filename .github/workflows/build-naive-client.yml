@@ -101,24 +101,26 @@ jobs:
           fi
       - run: ccache -s || true
 
-      - name: Locate binary
+      - name: Package binary (+ shared libs for component/debug build)
         id: bin
-        run: |
-          if [ "$BUILD_MODE" = release ]; then
-            echo "path=src/out/Release/naive" >>"$GITHUB_OUTPUT"
-          else
-            echo "path=src/out/Debug/naive" >>"$GITHUB_OUTPUT"
-          fi
-
-      - name: Smoke check binary
         run: |
           out="out/${BUILD_MODE^}"   # Debug or Release
           ls -lh "$out/naive"
           file "$out/naive" || true
+          # debug = component build => naive depends on many .so next to it.
+          # Bundle naive + all .so so it can run standalone. release = single
+          # binary, no libs needed.
+          mkdir -p "$GITHUB_WORKSPACE/naive-pkg"
+          cp "$out/naive" "$GITHUB_WORKSPACE/naive-pkg/"
+          if [ "$BUILD_MODE" != release ]; then
+            find "$out" -maxdepth 1 -name '*.so' -exec cp {} "$GITHUB_WORKSPACE/naive-pkg/" \;
+            echo "bundled $(ls "$GITHUB_WORKSPACE"/naive-pkg/*.so | wc -l) shared libs"
+          fi
+          ls -lh "$GITHUB_WORKSPACE/naive-pkg" | head
 
       - uses: actions/upload-artifact@v4
         with:
           name: naive-linux-x64-${{ env.BUILD_MODE }}-${{ github.sha }}
-          path: ${{ steps.bin.outputs.path }}
+          path: naive-pkg
           if-no-files-found: error
           retention-days: 14
