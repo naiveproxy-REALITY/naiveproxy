@@ -4,6 +4,7 @@
 
 #include "net/ssl/ssl_config.h"
 
+#include "base/no_destructor.h"
 #include "net/cert/cert_verifier.h"
 
 namespace net {
@@ -24,6 +25,10 @@ SSLConfig::SSLConfig() = default;
 SSLConfig::SSLConfig(const SSLConfig& other) = default;
 SSLConfig::SSLConfig(SSLConfig&& other) = default;
 SSLConfig::~SSLConfig() = default;
+
+SSLConfig::RealityConfig::RealityConfig() = default;
+SSLConfig::RealityConfig::RealityConfig(const RealityConfig& other) = default;
+SSLConfig::RealityConfig::~RealityConfig() = default;
 SSLConfig& SSLConfig::operator=(const SSLConfig&) = default;
 SSLConfig& SSLConfig::operator=(SSLConfig&&) = default;
 
@@ -48,15 +53,20 @@ int SSLConfig::GetCertVerifyFlags() const {
 }
 
 namespace {
-SSLConfig::RealityConfig g_global_reality_config;
+// base::NoDestructor avoids the exit-time destructor warning/cost for a
+// non-trivially-destructible object with static storage duration.
+SSLConfig::RealityConfig& GlobalRealityConfig() {
+  static base::NoDestructor<SSLConfig::RealityConfig> config;
+  return *config;
 }
+}  // namespace
 
 void SetGlobalRealityConfig(const SSLConfig::RealityConfig& config) {
-  g_global_reality_config = config;
+  GlobalRealityConfig() = config;
 }
 
 const SSLConfig::RealityConfig& GetGlobalRealityConfig() {
-  return g_global_reality_config;
+  return GlobalRealityConfig();
 }
 
 }  // namespace net

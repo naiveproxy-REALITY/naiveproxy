@@ -34,6 +34,7 @@ constexpr base::TimeDelta kIdleCheckPeriod = base::Minutes(1);
 
 NaiveProxy::Tunnel::Tunnel() = default;
 NaiveProxy::Tunnel::~Tunnel() = default;
+NaiveProxy::PendingSocks5::PendingSocks5() = default;
 NaiveProxy::PendingSocks5::~PendingSocks5() = default;
 
 NaiveProxy::NaiveProxy(std::unique_ptr<ServerSocket> listen_socket,

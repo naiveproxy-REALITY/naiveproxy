@@ -44,6 +44,10 @@ struct NET_EXPORT SSLConfig {
   // REALITY client configuration. When |enabled| is true, the TLS
   // ClientHello's legacy session_id is replaced with encrypted auth data.
   struct NET_EXPORT RealityConfig {
+    RealityConfig();
+    RealityConfig(const RealityConfig& other);
+    ~RealityConfig();
+
     bool enabled = false;
     std::string server_name;                 // SNI dest domain (e.g. "www.microsoft.com")
     std::vector<uint8_t> server_public_key;  // X25519 public key (32 bytes)

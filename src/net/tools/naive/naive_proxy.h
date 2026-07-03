@@ -70,6 +70,7 @@ class NaiveProxy {
   };
 
   struct PendingSocks5 {
+    PendingSocks5();
     ~PendingSocks5();
     std::unique_ptr<Socks5ServerSocket> socket;
     NetworkAnonymizationKey nak;
