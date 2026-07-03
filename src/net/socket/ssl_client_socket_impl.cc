@@ -672,12 +672,21 @@ int SSLClientSocketImpl::Init() {
   //
   // TODO(rsleevi): Should this code allow hostnames that violate the LDH rule?
   // See https://crbug.com/496472 and https://crbug.com/496468 for discussion.
-  if (!host_is_ip_address) {
-    const std::string& sni_host = ssl_config_.reality.enabled &&
-                                          !ssl_config_.reality.server_name.empty()
-                                      ? ssl_config_.reality.server_name
-                                      : host_and_port_.host();
-    if (!SSL_set_tlsext_host_name(ssl_.get(), sni_host.c_str())) {
+  //
+  // REALITY: the proxy is normally addressed by IP, but REALITY must still send
+  // a fabricated SNI (the covering domain, e.g. apple.com) so the ClientHello is
+  // indistinguishable from a real browser visiting that site and so the server
+  // can route/mirror correctly. server_name is a real DNS name, not an IP, so it
+  // does not violate RFC 6066. Therefore apply it unconditionally, independent of
+  // whether the proxy address (host_and_port_) happens to be an IP literal.
+  if (ssl_config_.reality.enabled &&
+      !ssl_config_.reality.server_name.empty()) {
+    if (!SSL_set_tlsext_host_name(ssl_.get(),
+                                  ssl_config_.reality.server_name.c_str())) {
+      return ERR_UNEXPECTED;
+    }
+  } else if (!host_is_ip_address) {
+    if (!SSL_set_tlsext_host_name(ssl_.get(), host_and_port_.host().c_str())) {
       return ERR_UNEXPECTED;
     }
   }
