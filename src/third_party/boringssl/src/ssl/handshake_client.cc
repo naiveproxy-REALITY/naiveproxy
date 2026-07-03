@@ -255,15 +255,6 @@ static bool reality_encrypt_client_session_id_inner(SSL_HANDSHAKE *hs,
     return false;
   }
 
-  {
-    uint8_t dbg_pub[32];
-    X25519_public_from_private(dbg_pub, priv_key);
-    fprintf(stderr, "REALITY_CLI_DBG x25519_pub[0..8]=");
-    for (int i = 0; i < 8; i++) fprintf(stderr, "%02x", dbg_pub[i]);
-    fprintf(stderr, " client_random[0..8]=");
-    for (int i = 0; i < 8; i++) fprintf(stderr, "%02x", ssl->s3->client_random[i]);
-    fprintf(stderr, "\n");
-  }
   if (!X25519(auth_key, priv_key,
               ssl->config->reality_server_public_key)) {
     OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
