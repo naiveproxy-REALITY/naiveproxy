@@ -794,7 +794,24 @@ int SSLClientSocketImpl::Init() {
       SSL_SIGN_RSA_PSS_RSAE_SHA512,
       SSL_SIGN_RSA_PKCS1_SHA512,
   };
-  if (base::FeatureList::IsEnabled(features::kTlsMldsaSignatures)) {
+  // REALITY injects an Ed25519 temporary certificate on the server side (per
+  // the REALITY protocol), but Chromium's default verify prefs do NOT include
+  // Ed25519, so the server's CertificateVerify is rejected with
+  // NO_COMMON_SIGNATURE_ALGORITHMS. When REALITY is enabled, prepend Ed25519 to
+  // the accepted verification algorithms.
+  static const uint16_t kVerifyPrefsReality[] = {
+      SSL_SIGN_ED25519,
+      SSL_SIGN_ECDSA_SECP256R1_SHA256, SSL_SIGN_RSA_PSS_RSAE_SHA256,
+      SSL_SIGN_RSA_PKCS1_SHA256,       SSL_SIGN_ECDSA_SECP384R1_SHA384,
+      SSL_SIGN_RSA_PSS_RSAE_SHA384,    SSL_SIGN_RSA_PKCS1_SHA384,
+      SSL_SIGN_RSA_PSS_RSAE_SHA512,    SSL_SIGN_RSA_PKCS1_SHA512,
+  };
+  if (ssl_config_.reality.enabled) {
+    if (!SSL_set_verify_algorithm_prefs(ssl_.get(), kVerifyPrefsReality,
+                                        std::size(kVerifyPrefsReality))) {
+      return ERR_UNEXPECTED;
+    }
+  } else if (base::FeatureList::IsEnabled(features::kTlsMldsaSignatures)) {
     if (!SSL_set_verify_algorithm_prefs(ssl_.get(), kVerifyPrefsWithMlDsa,
                                         std::size(kVerifyPrefsWithMlDsa))) {
       return ERR_UNEXPECTED;
