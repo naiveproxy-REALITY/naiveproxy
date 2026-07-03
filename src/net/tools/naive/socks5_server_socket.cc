@@ -604,7 +604,7 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
     // For UDP ASSOCIATE: create UDP relay socket and set magic endpoint.
     if (is_udp_associate_) {
       udp_relay_socket_ =
-          std::make_unique<UDPServerSocket>(net_log_, NetLogSource());
+          std::make_unique<UDPServerSocket>(net_log_.net_log(), net_log_.source());
       IPEndPoint bind_addr(IPAddress(0, 0, 0, 0), 0);
       int rv = udp_relay_socket_->Listen(bind_addr);
       if (rv != OK) {
