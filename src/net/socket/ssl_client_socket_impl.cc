@@ -881,7 +881,7 @@ int SSLClientSocketImpl::Init() {
           ssl_config_.reality.server_public_key.data(),
           ssl_config_.reality.short_id.data(),
           ssl_config_.reality.version.data());
-      net_log_.AddEvent(NetLogEventType::SSL_CONNECTED, [&] {
+      net_log_.AddEvent(NetLogEventType::SSL_CONNECT, [&] {
         return base::DictValue().Set("reality", true);
       });
     }
