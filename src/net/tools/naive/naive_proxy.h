@@ -21,6 +21,7 @@
 #include "net/tools/naive/naive_protocol.h"
 #include "net/tools/naive/naive_udp_connection.h"
 #include "net/tools/naive/preamble_getter.h"
+#include "net/tools/naive/socks5_server_socket.h"
 
 namespace net {
 

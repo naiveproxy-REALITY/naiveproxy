@@ -10,6 +10,7 @@
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/values.h"
 #include "net/base/proxy_server.h"
 #include "net/base/proxy_string_util.h"
 #include "net/base/url_util.h"
