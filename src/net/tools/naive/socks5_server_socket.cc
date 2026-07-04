@@ -607,10 +607,13 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
           std::make_unique<UDPServerSocket>(net_log_.net_log(), net_log_.source());
       IPEndPoint bind_addr(IPAddress(0, 0, 0, 0), 0);
       int rv = udp_relay_socket_->Listen(bind_addr);
+      LOG(ERROR) << "UoT DIAG udp relay Listen rv=" << rv;
       if (rv != OK) {
         return rv;
       }
       udp_relay_socket_->GetLocalAddress(&udp_relay_address_);
+      LOG(ERROR) << "UoT DIAG udp relay bound to "
+                 << udp_relay_address_.ToString();
       // Set request endpoint to UoT magic address so NaiveProxy knows
       // to create a UoT connection instead of a normal TCP connection.
       request_endpoint_ = HostPortPair(kUotMagicAddress, 0);
@@ -631,25 +634,29 @@ int Socks5ServerSocket::DoHandshakeWrite() {
 
   if (buffer_.empty()) {
     if (is_udp_associate_) {
-      // Reply with the UDP relay address.
+      // Reply with the UDP relay address. The port is written big-endian on the
+      // wire (RFC 1928), i.e. the high then low byte of the HOST-order port.
+      // (Previously this used HostToNet16() and then also split big-endian,
+      // double-swapping the bytes on little-endian hosts and returning a wrong
+      // relay port to the client.)
       const IPAddress& ip = udp_relay_address_.address();
-      uint16_t port_be = base::HostToNet16(udp_relay_address_.port());
+      uint16_t port = udp_relay_address_.port();
       if (ip.IsIPv4()) {
         const auto bytes = ip.bytes();
         buffer_ = {
             kSOCKS5Version, reply_, kSOCKS5Reserved, kEndPointResolvedIPv4,
         };
         buffer_.insert(buffer_.end(), bytes.begin(), bytes.begin() + 4);
-        buffer_.push_back((port_be >> 8) & 0xff);
-        buffer_.push_back(port_be & 0xff);
+        buffer_.push_back((port >> 8) & 0xff);
+        buffer_.push_back(port & 0xff);
       } else {
         const auto bytes = ip.bytes();
         buffer_ = {
             kSOCKS5Version, reply_, kSOCKS5Reserved, kEndPointResolvedIPv6,
         };
         buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
-        buffer_.push_back((port_be >> 8) & 0xff);
-        buffer_.push_back(port_be & 0xff);
+        buffer_.push_back((port >> 8) & 0xff);
+        buffer_.push_back(port & 0xff);
       }
     } else {
       buffer_ = {

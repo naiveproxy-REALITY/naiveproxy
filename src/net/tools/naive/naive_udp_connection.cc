@@ -217,6 +217,8 @@ void NaiveUdpConnection::OnConnectServerComplete(int result) {
 
 int NaiveUdpConnection::Run(CompletionOnceCallback callback) {
   DCHECK(connected_);
+  LOG(ERROR) << "UoT DIAG conn " << id_ << " Run() udp_relay valid="
+             << (udp_relay_ != nullptr);
   run_callback_ = std::move(callback);
   StartClientRead();
   StartServerRead();
