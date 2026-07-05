@@ -1,4 +1,89 @@
-# NaïveProxy ![build workflow](https://github.com/klzgrad/naiveproxy/actions/workflows/build.yml/badge.svg)
+# NaiveProxy-REALITY
+
+A [NaiveProxy](https://github.com/klzgrad/naiveproxy) client hardened with the
+[REALITY](https://github.com/XTLS/REALITY) TLS layer. The client reuses
+Chromium's network stack (so its TLS ClientHello is byte-for-byte a real
+Chrome's), and REALITY makes the handshake indistinguishable from a genuine
+visit to a chosen "mirror" website — defeating active TLS-fingerprint probing.
+
+The server side is a companion **Envoy** build (see the
+[envoy fork](https://github.com/justinwoo280/envoy)), not Caddy/forwardproxy.
+
+> This is a fork. Upstream NaiveProxy's own README (padding protocol spec,
+> Chromium changes) is preserved below from the "Padding protocol" section down.
+
+## What this fork adds
+
+- **REALITY transport** (faithful to `xtls/reality`): Ed25519 ephemeral certs,
+  TCP + HTTP/2 only (no H3/QUIC). The client presents Chrome's fingerprint;
+  JA4/cipher verified byte-for-byte against real Chrome.
+- **`bind-interface`** option: binds outbound sockets to a physical NIC at the
+  socket layer (`SO_BINDTODEVICE` / `IP_BOUND_IF` / `IP_UNICAST_IF`), enabling
+  loop-free system-wide TUN mode with **no per-server bypass route**. Supports
+  `"auto"` detection.
+- **System-wide TUN mode** via a separate `hev-socks5-tunnel` process, with
+  ready-made hook scripts and a guide: see
+  [`src/net/tools/naive/tun/README.md`](src/net/tools/naive/tun/README.md).
+- **UDP-over-TCP (UoT)**: standard SOCKS5 `UDP ASSOCIATE` tunneled over the H2
+  stream.
+
+## Platforms
+
+Release target: a single `naive` binary.
+
+| Platform | Status |
+|----------|--------|
+| Linux glibc x64 | built + stress-tested |
+| Windows x64 | built (CI); runtime TUN not yet hardware-tested |
+| macOS / musl-static | possible (upstream build jobs exist); not wired in this fork's CI |
+
+## Client setup
+
+Run `./naive config.json` to get a SOCKS5 proxy on local port 1080:
+
+```jsonc
+{
+  "listen": "socks://127.0.0.1:1080",
+  "proxy":  "https://user:pass@YOUR_VPS_IP:8443",
+  "reality": {
+    "server_name": "www.apple.com",      // the mirror host to impersonate
+    "public_key":  "<base64 X25519 public key>",
+    "short_id":    "<base64 short id>",
+    "version":     [1, 0, 0]
+  }
+  // optional:
+  // "no-post-quantum": true          // force plain X25519 (default offers X25519MLKEM768)
+  // "bind-interface": "auto"         // socket-layer NIC bind for TUN mode
+}
+```
+
+The `public_key`/`short_id` pair with the server's `private_key`/`short_id`.
+See [`USAGE.txt`](USAGE.txt) for the full parameter list.
+
+## Server setup
+
+The server is Envoy with the REALITY handshaker and the `naive_forward_proxy`
+filter, running on a **remote VPS** (never colocated with the client). See the
+envoy fork's `NAIVE_SERVER_CONFIG.md` (config invariants, incl. `codec_type:
+HTTP2` and `alpn_protocols: ["h2"]`), `NAIVE_BUILD_RUNBOOK.md` (how to build
+`envoy-min`), and `DESIGN.md` (architecture, decisions, and root-cause writeups
+of every bug found).
+
+## Build from source
+
+CI: [`.github/workflows/build-naive-client.yml`](.github/workflows/build-naive-client.yml)
+builds the Linux x64 (debug, for stress testing) and Windows x64 (release)
+clients. The upstream full matrix lives in `.github/workflows/build.yml`.
+
+Your REALITY/UoT/bind-interface changes must be committed on the pushed branch —
+CI checks out committed code only.
+
+---
+
+# Upstream NaiveProxy documentation
+
+The sections below are inherited from upstream NaiveProxy and describe the
+Chromium-net-stack camouflage and the padding protocol, which this fork keeps.
 
 NaïveProxy uses Chromium's network stack to camouflage traffic with strong censorship resistence and low detectablility. Reusing Chrome's stack also ensures best practices in performance and security.
 
@@ -6,88 +91,8 @@ The following traffic attacks are mitigated by using Chromium's network stack:
 
 * Website fingerprinting / traffic classification: mitigated by [traffic multiplexing in HTTP/2](https://arxiv.org/abs/1707.00641) and parroting preambles.
 * [TLS parameter fingerprinting](https://arxiv.org/abs/1607.01639): defeated by reusing [Chrome's network stack](https://www.chromium.org/developers/design-documents/network-stack).
-* [Active probing](https://ensa.fi/active-probing/): defeated by *application fronting*, i.e. hiding proxy servers behind a commonly used frontend server with application-layer routing.
+* [Active probing](https://ensa.fi/active-probing/): defeated by *application fronting* (upstream) or by REALITY (this fork).
 * Length-based traffic analysis: mitigated by padding and fragmentation.
-
-## Architecture
-
-[Browser → Naïve client] ⟶ Censor ⟶ [Frontend → Naïve server] ⟶ Internet
-
-NaïveProxy uses Chromium's network stack to parrot traffic between regular Chrome browsers and standard frontend servers.
-
-The frontend server can be any well-known reverse proxy that is able to route HTTP/2 traffic based on HTTP authorization headers, preventing active probing of proxy existence. Known ones include Caddy with its forwardproxy plugin and HAProxy.
-
-The Naïve server here works as a forward proxy and a packet length padding layer. Caddy forwardproxy is also a forward proxy but it lacks a padding layer. A [fork](https://github.com/klzgrad/forwardproxy) adds the NaïveProxy padding layer to forwardproxy, combining both in one.
-
-## Download NaïveProxy
-
-Download [here](https://github.com/klzgrad/naiveproxy/releases/latest). Supported platforms include: Windows, Android (with [Exclave](https://github.com/dyhkwong/Exclave), [husi](https://github.com/xchacha20-poly1305/husi), [NekoBox](https://github.com/MatsuriDayo/NekoBoxForAndroid)), Linux, Mac OS, and OpenWrt ([support status](https://github.com/klzgrad/naiveproxy/wiki/OpenWrt-Support)).
-
-Users should always use the latest version to keep signatures identical to Chrome.
-
-Build from source: Please see [.github/workflows/build.yml](https://github.com/klzgrad/naiveproxy/blob/master/.github/workflows/build.yml).
-
-## Server setup
-
-The following describes the naïve fork of Caddy forwardproxy setup.
-
-Download [here](https://github.com/klzgrad/forwardproxy/releases/latest) or build from source:
-```sh
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive
-```
-
-Example Caddyfile (replace `user` and `pass` accordingly):
-```
-{
-  order forward_proxy before file_server
-  log {
-    exclude http.log.error # Avoid logging user activity
-  }
-}
-:443, example.com {
-  tls me@example.com
-  encode
-  forward_proxy {
-    basic_auth user pass
-    hide_ip
-    hide_via
-    probe_resistance
-  }
-  file_server {
-    root /var/www/html
-  }
-}
-```
-`:443` must appear first for this Caddyfile to work. See Caddyfile [docs](https://caddyserver.com/docs/caddyfile/directives/tls) for customizing TLS certificates. For more advanced usage consider using [JSON for Caddy 2's config](https://caddyserver.com/docs/json/).
-
-Run with the Caddyfile:
-```
-sudo setcap cap_net_bind_service=+ep ./caddy
-./caddy start
-```
-
-See also [Systemd unit example](https://github.com/klzgrad/naiveproxy/wiki/Run-Caddy-as-a-daemon) and [HAProxy setup](https://github.com/klzgrad/naiveproxy/wiki/HAProxy-Setup).
-
-## Client setup
-
-Run `./naive` with the following `config.json` to get a SOCKS5 proxy at local port 1080.
-```json
-{
-  "listen": "socks://127.0.0.1:1080",
-  "proxy": "https://user:pass@example.com"
-}
-```
-
-Or `quic://user:pass@example.com`, if it works better. See also [parameter usage](https://github.com/klzgrad/naiveproxy/blob/master/USAGE.txt) and [performance tuning](https://github.com/klzgrad/naiveproxy/wiki/Performance-Tuning).
-
-## Third-party integration
-
-* [v2rayN](https://github.com/2dust/v2rayN), GUI client
-
-## Notes for downstream
-
-Do not use the master branch to track updates, as it rebases from a new root commit for every new Chrome release. Use stable releases and the associated tags to track new versions, where short release notes are also provided.
 
 ## Padding protocol, an informal specification
 
