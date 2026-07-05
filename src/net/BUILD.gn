@@ -2045,6 +2045,8 @@ static_library("preload_decoder") {
 
 executable("naive") {
   sources = [
+    "tools/naive/bind_to_interface_client_socket_factory.cc",
+    "tools/naive/bind_to_interface_client_socket_factory.h",
     "tools/naive/http_proxy_server_socket.cc",
     "tools/naive/http_proxy_server_socket.h",
     "tools/naive/naive_command_line.cc",

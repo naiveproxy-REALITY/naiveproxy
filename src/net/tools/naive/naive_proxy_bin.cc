@@ -64,6 +64,7 @@
 #include "net/ssl/ssl_config_service.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
+#include "net/tools/naive/bind_to_interface_client_socket_factory.h"
 #include "net/tools/naive/naive_command_line.h"
 #include "net/tools/naive/naive_config.h"
 #include "net/tools/naive/naive_protocol.h"
@@ -242,6 +243,15 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
 
   if (!config.host_resolver_rules.empty()) {
     builder.set_host_mapping_rules(config.host_resolver_rules);
+  }
+
+  // Optional: bind outbound sockets (to the upstream proxy / REALITY server)
+  // to a physical interface, so they bypass an external TUN (tun2socks) without
+  // any bypass routes.
+  if (!config.bind_interface.empty()) {
+    builder.set_client_socket_factory(
+        std::make_unique<BindToInterfaceClientSocketFactory>(
+            config.bind_interface));
   }
 
   builder.SetCertVerifier(
@@ -423,6 +433,7 @@ int main(int argc, char* argv[]) {
                  "--idle-timeout=<SECONDS>   Close idle streams after timeout\n"
                  "--extra-headers=...        Extra headers split by CRLF\n"
                  "--host-resolver-rules=...  Resolver rules\n"
+                 "--bind-interface=<name>    Bind outbound sockets to interface\n"
                  "--resolver-range=...       Redirect resolver range\n"
                  "--log[=<path>]             Log to stderr, or file\n"
                  "--log-net-log=<path>       Save NetLog\n"

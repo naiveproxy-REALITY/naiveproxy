@@ -61,6 +61,13 @@ struct NaiveConfig {
 
   std::string host_resolver_rules;
 
+  // Optional: bind all OUTBOUND sockets (to the upstream proxy / REALITY
+  // server) to this physical network interface, so those connections bypass a
+  // TUN device driven by an external tun2socks (e.g. hev-socks5-tunnel). This
+  // makes the "proxy server bypass" work without any bypass routes. Empty =
+  // disabled. Name is an interface name (e.g. "eth0", "Wi-Fi").
+  std::string bind_interface;
+
   IPAddress resolver_range = {100, 64, 0, 0};
   size_t resolver_prefix = 10;
 

@@ -270,6 +270,15 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
     }
   }
 
+  if (const base::Value* v = value.Find("bind-interface")) {
+    if (const std::string* str = v->GetIfString()) {
+      bind_interface = *str;
+    } else {
+      std::cerr << "Invalid bind-interface" << std::endl;
+      return false;
+    }
+  }
+
   if (const base::Value* v = value.Find("resolver-range")) {
     if (const std::string* str = v->GetIfString(); str && !str->empty()) {
       if (!net::ParseCIDRBlock(*str, &resolver_range, &resolver_prefix)) {
