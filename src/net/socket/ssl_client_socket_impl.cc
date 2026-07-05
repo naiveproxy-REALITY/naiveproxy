@@ -803,21 +803,19 @@ int SSLClientSocketImpl::Init() {
       SSL_SIGN_RSA_PSS_RSAE_SHA512,
       SSL_SIGN_RSA_PKCS1_SHA512,
   };
-  // REALITY injects an Ed25519 temporary certificate on the server side (per
-  // the REALITY protocol), but Chromium's default verify prefs do NOT include
-  // Ed25519, so the server's CertificateVerify is rejected with
-  // NO_COMMON_SIGNATURE_ALGORITHMS. When REALITY is enabled, prepend Ed25519 to
-  // the accepted verification algorithms.
-  static const uint16_t kVerifyPrefsReality[] = {
-      SSL_SIGN_ED25519,
-      SSL_SIGN_ECDSA_SECP256R1_SHA256, SSL_SIGN_RSA_PSS_RSAE_SHA256,
-      SSL_SIGN_RSA_PKCS1_SHA256,       SSL_SIGN_ECDSA_SECP384R1_SHA384,
-      SSL_SIGN_RSA_PSS_RSAE_SHA384,    SSL_SIGN_RSA_PKCS1_SHA384,
-      SSL_SIGN_RSA_PSS_RSAE_SHA512,    SSL_SIGN_RSA_PKCS1_SHA512,
-  };
+  // REALITY injects an Ed25519 disguise certificate on the server side and
+  // signs its CertificateVerify with Ed25519. We deliberately do NOT advertise
+  // Ed25519 in the signature_algorithms extension here, so the ClientHello stays
+  // byte-identical to a real Chrome (which does not list Ed25519). BoringSSL is
+  // patched to accept the server's Ed25519 CertificateVerify anyway when REALITY
+  // is enabled (see tls12_check_peer_sigalg): REALITY's trust comes from the
+  // session_id X25519+HKDF authentication, not from this certificate chain, so
+  // accepting the Ed25519 signature without advertising it is safe and removes a
+  // fingerprint tell. REALITY therefore uses the same standard verify prefs as
+  // ordinary Chrome (kVerifyPrefs below).
   if (ssl_config_.reality.enabled) {
-    if (!SSL_set_verify_algorithm_prefs(ssl_.get(), kVerifyPrefsReality,
-                                        std::size(kVerifyPrefsReality))) {
+    if (!SSL_set_verify_algorithm_prefs(ssl_.get(), kVerifyPrefs,
+                                        std::size(kVerifyPrefs))) {
       return ERR_UNEXPECTED;
     }
   } else if (base::FeatureList::IsEnabled(features::kTlsMldsaSignatures)) {
@@ -877,11 +875,17 @@ int SSLClientSocketImpl::Init() {
         host_and_port_, &client_cert_, &client_private_key_);
   }
 
+  // GREASE ECH (the fe0d extension) is part of a real Chrome ClientHello. It is
+  // pure padding and does not affect REALITY's session_id/key_share injection,
+  // so enable it even under REALITY to keep the fingerprint (JA4 extension set)
+  // identical to a real Chrome of the same version. Without it, REALITY's
+  // ClientHello is missing fe0d and is distinguishable from real Chrome.
+  if (context_->config().ech_enabled) {
+    // TODO(crbug.com/41482204): Enable this unconditionally.
+    SSL_set_enable_ech_grease(ssl_.get(), 1);
+  }
+
   if (!ssl_config_.reality.enabled) {
-    if (context_->config().ech_enabled) {
-      // TODO(crbug.com/41482204): Enable this unconditionally.
-      SSL_set_enable_ech_grease(ssl_.get(), 1);
-    }
     if (!ssl_config_.ech_config_list.empty()) {
       DCHECK(context_->config().ech_enabled);
       net_log_.AddEvent(NetLogEventType::SSL_ECH_CONFIG_LIST, [&] {
@@ -895,6 +899,9 @@ int SSLClientSocketImpl::Init() {
       }
     }
 
+    // REALITY requires a fixed extension order for its authentication; do not
+    // permute. (JA4 sorts extensions before hashing, so this does not change
+    // the fingerprint.)
     SSL_set_permute_extensions(ssl_.get(), 1);
   }
 

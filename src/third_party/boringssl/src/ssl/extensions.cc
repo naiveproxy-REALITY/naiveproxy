@@ -357,7 +357,23 @@ bool tls12_check_peer_sigalg(const SSL_HANDSHAKE *hs, uint8_t *out_alert,
   // The peer must have selected an algorithm that is consistent with its public
   // key, the TLS version, and what we advertised.
   Span<const uint16_t> sigalgs = tls12_get_verify_sigalgs(hs);
-  if (std::find(sigalgs.begin(), sigalgs.end(), sigalg) == sigalgs.end() ||
+  bool advertised = std::find(sigalgs.begin(), sigalgs.end(), sigalg) != sigalgs.end();
+
+  // REALITY carve-out: the server injects an Ed25519 disguise certificate and
+  // signs its CertificateVerify with Ed25519. To keep the client's advertised
+  // signature_algorithms extension byte-identical to a real Chrome (which does
+  // NOT list Ed25519), we deliberately omit Ed25519 from the advertised verify
+  // sigalgs. Accept an Ed25519 CertificateVerify here anyway when REALITY is
+  // enabled: REALITY's trust does not derive from this certificate chain (it
+  // comes from the session_id X25519+HKDF authentication), so accepting the
+  // server's Ed25519 signature does not weaken REALITY's security, while
+  // dropping Ed25519 from the wire removes a fingerprint tell.
+  if (!advertised && hs->ssl->config != nullptr &&
+      hs->ssl->config->reality_client_enabled && sigalg == SSL_SIGN_ED25519) {
+    advertised = true;
+  }
+
+  if (!advertised ||
       !ssl_pkey_supports_algorithm(hs->ssl, pkey, sigalg, /*is_verify=*/true)) {
     OPENSSL_PUT_ERROR(SSL, SSL_R_WRONG_SIGNATURE_TYPE);
     *out_alert = SSL_AD_ILLEGAL_PARAMETER;
