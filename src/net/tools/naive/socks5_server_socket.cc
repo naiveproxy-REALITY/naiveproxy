@@ -607,13 +607,10 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
           std::make_unique<UDPServerSocket>(net_log_.net_log(), net_log_.source());
       IPEndPoint bind_addr(IPAddress(0, 0, 0, 0), 0);
       int rv = udp_relay_socket_->Listen(bind_addr);
-      LOG(ERROR) << "UoT DIAG udp relay Listen rv=" << rv;
       if (rv != OK) {
         return rv;
       }
       udp_relay_socket_->GetLocalAddress(&udp_relay_address_);
-      LOG(ERROR) << "UoT DIAG udp relay bound to "
-                 << udp_relay_address_.ToString();
       // Set request endpoint to UoT magic address so NaiveProxy knows
       // to create a UoT connection instead of a normal TCP connection.
       request_endpoint_ = HostPortPair(kUotMagicAddress, 0);

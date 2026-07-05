@@ -156,7 +156,6 @@ bool NaiveUdpConnection::ParseSocks5UdpPacket(const uint8_t* data, size_t len,
 
 int NaiveUdpConnection::Connect(CompletionOnceCallback callback) {
   DCHECK(!connect_callback_);
-  LOG(ERROR) << "UoT DIAG conn " << id_ << " Connect() entered";
   connect_callback_ = std::move(callback);
   StartConnectServer();
   return ERR_IO_PENDING;
@@ -166,12 +165,6 @@ void NaiveUdpConnection::StartConnectServer() {
   url::SchemeHostPort endpoint("http", kUotMagicAddress, 0);
   server_socket_handle_ = std::make_unique<ClientSocketHandle>();
 
-  LOG(ERROR) << "UoT DIAG conn " << id_ << " connecting H2 CONNECT to "
-             << endpoint.Serialize() << " valid=" << endpoint.IsValid()
-             << " via " << proxy_info_.ToDebugString()
-             << " is_direct=" << proxy_info_.is_direct()
-             << " session=" << (session_ != nullptr);
-
   int rv = InitSocketHandleForHttpRequest(
       std::move(endpoint), LOAD_IGNORE_LIMITS, MAXIMUM_PRIORITY, session_,
       proxy_info_, {}, PRIVACY_MODE_DISABLED, network_anonymization_key_,
@@ -179,8 +172,6 @@ void NaiveUdpConnection::StartConnectServer() {
       net_log_, server_socket_handle_.get(), io_callback_,
       ClientSocketPool::ProxyAuthCallback());
 
-  LOG(ERROR) << "UoT DIAG conn " << id_
-             << " InitSocketHandleForHttpRequest rv=" << rv;
   if (rv != ERR_IO_PENDING) {
     OnConnectServerComplete(rv);
   }
@@ -217,8 +208,6 @@ void NaiveUdpConnection::OnConnectServerComplete(int result) {
 
 int NaiveUdpConnection::Run(CompletionOnceCallback callback) {
   DCHECK(connected_);
-  LOG(ERROR) << "UoT DIAG conn " << id_ << " Run() udp_relay valid="
-             << (udp_relay_ != nullptr);
   run_callback_ = std::move(callback);
   StartClientRead();
   StartServerRead();
