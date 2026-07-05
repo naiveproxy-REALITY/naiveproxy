@@ -46,7 +46,9 @@ class BindToInterfaceClientSocketFactory : public ClientSocketFactory {
       const SSLConfig& ssl_config) override;
 
  private:
-  std::string interface_name_;
+  // Resolved interface name actually used for binding (for SO_BINDTODEVICE on
+  // Linux). Equals the configured name, or the detected name when "auto".
+  std::string resolved_name_;
   // Resolved interface index (0 if resolution failed).
   uint32_t interface_index_ = 0;
 };
