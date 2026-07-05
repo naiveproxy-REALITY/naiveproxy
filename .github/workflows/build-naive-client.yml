@@ -124,3 +124,68 @@ jobs:
           path: naive-pkg
           if-no-files-found: error
           retention-days: 14
+
+  # Windows x64 build to verify the client (incl. bind-interface's IP_UNICAST_IF
+  # path) compiles and links on Windows. Release = single naive.exe. Mirrors the
+  # author's build.yml win job, trimmed to one arch and made self-contained
+  # (get-clang.sh pulls the toolchain; sccache cache is best-effort).
+  build-win:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    env:
+      EXTRA_FLAGS: 'target_cpu="x64"'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/third_party/llvm-build/Release+Asserts/
+            src/gn/
+            ~/.cargo/bin/
+            ~/bin/ninja.exe
+          key: toolchains-win-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
+
+      - name: Cache PGO (win64)
+        uses: actions/cache@v4
+        with:
+          path: src/chrome/build/pgo_profiles/chrome-win64-*
+          key: pgo-win64-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
+
+      - id: ccache-timestamp
+        run: echo "CCACHE_TIMESTAMP=$(date +%s)" >>$GITHUB_OUTPUT
+
+      - name: Cache sccache files
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/Mozilla/sccache
+          key: ccache-win-x64-${{ hashFiles('CHROMIUM_VERSION') }}-${{ steps.ccache-timestamp.outputs.CCACHE_TIMESTAMP }}
+          restore-keys: ccache-win-x64-${{ hashFiles('CHROMIUM_VERSION') }}-
+
+      - name: Install ninja (Windows)
+        run: |
+          if [ ! -f ~/bin/ninja.exe ]; then
+            curl -LO https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-win.zip
+            unzip ninja-win.zip -d ~/bin
+          fi
+          echo "$HOME/bin" >>"$GITHUB_PATH"
+
+      - run: ./get-clang.sh
+      - run: ~/.cargo/bin/sccache -z || true
+      - name: Build naive (release, x64)
+        run: ./build.sh
+      - run: ~/.cargo/bin/sccache -s || true
+
+      - name: Package naive.exe
+        run: |
+          ls -lh out/Release/naive.exe
+          mkdir -p "$GITHUB_WORKSPACE/naive-win-pkg"
+          cp out/Release/naive.exe "$GITHUB_WORKSPACE/naive-win-pkg/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naive-win-x64-release-${{ github.sha }}
+          path: naive-win-pkg
+          if-no-files-found: error
+          retention-days: 14
