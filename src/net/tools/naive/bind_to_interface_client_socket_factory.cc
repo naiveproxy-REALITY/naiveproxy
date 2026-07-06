@@ -211,8 +211,10 @@ int BindFdToInterface(uint32_t if_index,
 // NIC / TUN without honoring bind-interface.
 class BindToInterfaceUDPClientSocket : public UDPClientSocket {
  public:
+  // Note: qualify net::NetLog because UDPClientSocket has a NetLog() method,
+  // which otherwise shadows the type name inside this class scope.
   BindToInterfaceUDPClientSocket(DatagramSocket::BindType bind_type,
-                                 NetLog* net_log,
+                                 net::NetLog* net_log,
                                  const NetLogSource& source,
                                  uint32_t if_index,
                                  std::string if_name)
