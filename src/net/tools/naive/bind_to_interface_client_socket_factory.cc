@@ -7,12 +7,15 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "net/base/address_family.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces.h"
+#include "net/base/sockaddr_storage.h"
 #include "net/log/net_log_source.h"
 #include "net/socket/datagram_socket.h"
+#include "net/socket/socket_descriptor.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/udp_client_socket.h"
 
@@ -23,7 +26,8 @@
 #else
 #include <net/if.h>       // if_nametoindex, IFNAMSIZ
 #include <netinet/in.h>   // IPPROTO_IP, IP(V6)_BOUND_IF
-#include <sys/socket.h>   // setsockopt, SO_BINDTODEVICE
+#include <sys/socket.h>   // setsockopt, SO_BINDTODEVICE, sockaddr_storage
+#include <unistd.h>       // close
 #endif
 
 namespace net {
@@ -124,11 +128,30 @@ uint32_t ResolveInterface(const std::string& name, std::string* out_name) {
   return idx;
 }
 
-// Runs as the socket's BeforeConnectCallback: the fd exists and is not yet
-// connected. Binds it to the chosen interface. Returns a net error.
+// Returns the address family (AF_INET / AF_INET6) of an open socket fd, or
+// AF_UNSPEC if it cannot be determined. Works on an open-but-unbound socket:
+// getsockname reports ss_family even before bind/connect. Uses SockaddrStorage
+// for portable sockaddr/socklen handling (Windows uses int, POSIX socklen_t).
+int GetFdFamily(SocketDescriptor fd) {
+  if (fd == kInvalidSocket)
+    return AF_UNSPEC;
+  SockaddrStorage storage;
+  if (getsockname(fd, storage.addr(), &storage.addr_len) != 0)
+    return AF_UNSPEC;
+  return storage.addr()->sa_family;
+}
+
+// Binds an already-open, not-yet-connected fd to the chosen interface.
+// `family` is the socket's address family (AF_INET / AF_INET6), so that on
+// Windows/Apple/BSD we require *the matching* per-family setsockopt to succeed
+// rather than accepting "either family bound" (which would let a socket leak
+// out the physical NIC when only the irrelevant family's bind happened to
+// succeed). AF_UNSPEC means "unknown" and falls back to accepting either.
+// Returns a net error.
 int BindFdToInterface(uint32_t if_index,
                       const std::string& if_name,
-                      SocketDescriptor fd) {
+                      SocketDescriptor fd,
+                      int family) {
   if (if_index == 0 || fd == kInvalidSocket)
     return OK;  // nothing to do / disabled
 
@@ -141,20 +164,35 @@ int BindFdToInterface(uint32_t if_index,
   DWORD idx_h = if_index;
   int rv6 = setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_IF,
                        reinterpret_cast<const char*>(&idx_h), sizeof(idx_h));
-  if (rv4 != 0 && rv6 != 0) {
-    PLOG(ERROR) << "bind-interface: IP(V6)_UNICAST_IF failed";
+  // A v4 socket cannot take IPV6_UNICAST_IF (and vice versa); only demand the
+  // bind matching this socket's family. NOTE: on Windows IP(V6)_UNICAST_IF is a
+  // routing *hint*, not a hard bind like Linux SO_BINDTODEVICE -- the stack may
+  // still egress via another NIC based on connectivity. See TUN README.
+  bool ok = (family == AF_INET)    ? (rv4 == 0)
+            : (family == AF_INET6) ? (rv6 == 0)
+                                   : (rv4 == 0 || rv6 == 0);
+  if (!ok) {
+    PLOG(ERROR) << "bind-interface: IP(V6)_UNICAST_IF failed (family=" << family
+                << ")";
     return ERR_FAILED;
   }
 #elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
   int idx = static_cast<int>(if_index);
   int rv4 = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx));
   int rv6 = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx));
-  if (rv4 != 0 && rv6 != 0) {
-    PLOG(ERROR) << "bind-interface: IP(V6)_BOUND_IF failed";
+  bool ok = (family == AF_INET)    ? (rv4 == 0)
+            : (family == AF_INET6) ? (rv6 == 0)
+                                   : (rv4 == 0 || rv6 == 0);
+  if (!ok) {
+    PLOG(ERROR) << "bind-interface: IP(V6)_BOUND_IF failed (family=" << family
+                << ")";
     return ERR_FAILED;
   }
 #else  // Linux / Android
-  // SO_BINDTODEVICE binds by name and covers both v4 and v6. Needs CAP_NET_RAW.
+  // SO_BINDTODEVICE binds by name and covers both v4 and v6 with a single hard
+  // bind (traffic to a down/unreachable NIC is black-holed, never leaked).
+  // Needs CAP_NET_RAW. `family` is unused here.
+  (void)family;
   if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, if_name.c_str(),
                  static_cast<socklen_t>(if_name.size())) != 0) {
     PLOG(ERROR) << "bind-interface: SO_BINDTODEVICE(" << if_name
@@ -164,6 +202,73 @@ int BindFdToInterface(uint32_t if_index,
 #endif
   return OK;
 }
+
+// A UDPClientSocket that binds its fd to the chosen interface before connecting.
+// UDPClientSocket has no before-connect hook, so we create the platform socket
+// ourselves, bind it, and hand it to the base via AdoptOpenedSocket(); the base
+// Connect() then skips Open() and connects on our already-bound fd. This closes
+// the leak where a `quic://` upstream would egress raw UDP through the physical
+// NIC / TUN without honoring bind-interface.
+class BindToInterfaceUDPClientSocket : public UDPClientSocket {
+ public:
+  BindToInterfaceUDPClientSocket(DatagramSocket::BindType bind_type,
+                                 NetLog* net_log,
+                                 const NetLogSource& source,
+                                 uint32_t if_index,
+                                 std::string if_name)
+      : UDPClientSocket(bind_type, net_log, source),
+        if_index_(if_index),
+        if_name_(std::move(if_name)) {}
+
+  int Connect(const IPEndPoint& address) override {
+    int rv = OpenAndBind(address.GetFamily());
+    if (rv != OK)
+      return rv;
+    return UDPClientSocket::Connect(address);
+  }
+
+  int ConnectAsync(const IPEndPoint& address,
+                   CompletionOnceCallback callback) override {
+    int rv = OpenAndBind(address.GetFamily());
+    if (rv != OK)
+      return rv;
+    return UDPClientSocket::ConnectAsync(address, std::move(callback));
+  }
+
+ private:
+  // Creates a platform UDP socket for `family`, binds it to the interface, and
+  // adopts it so the base class connects on the bound fd instead of opening a
+  // fresh unbound one.
+  int OpenAndBind(AddressFamily family) {
+    if (if_index_ == 0)
+      return OK;  // binding disabled; base class opens normally
+    int af = ConvertAddressFamily(family);
+    SocketDescriptor fd = CreatePlatformSocket(af, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd == kInvalidSocket) {
+      PLOG(ERROR) << "bind-interface(udp): socket() failed";
+      return ERR_FAILED;
+    }
+    int rv = BindFdToInterface(if_index_, if_name_, fd, af);
+    if (rv != OK) {
+#if BUILDFLAG(IS_WIN)
+      closesocket(fd);
+#else
+      close(fd);
+#endif
+      return rv;
+    }
+    rv = AdoptOpenedSocket(family, fd);
+    if (rv != OK) {
+      PLOG(ERROR) << "bind-interface(udp): AdoptOpenedSocket failed";
+      // AdoptOpenedSocket closes the fd on failure.
+      return rv;
+    }
+    return OK;
+  }
+
+  uint32_t if_index_;
+  std::string if_name_;
+};
 
 }  // namespace
 
@@ -180,8 +285,13 @@ BindToInterfaceClientSocketFactory::CreateDatagramClientSocket(
     DatagramSocket::BindType bind_type,
     NetLog* net_log,
     const NetLogSource& source) {
-  return ClientSocketFactory::GetDefaultFactory()->CreateDatagramClientSocket(
-      bind_type, net_log, source);
+  if (interface_index_ == 0) {
+    // Binding disabled / unresolved: behave like the default factory.
+    return ClientSocketFactory::GetDefaultFactory()->CreateDatagramClientSocket(
+        bind_type, net_log, source);
+  }
+  return std::make_unique<BindToInterfaceUDPClientSocket>(
+      bind_type, net_log, source, interface_index_, resolved_name_);
 }
 
 std::unique_ptr<TransportClientSocket>
@@ -202,8 +312,8 @@ BindToInterfaceClientSocketFactory::CreateTransportClientSocket(
   raw->SetBeforeConnectCallback(base::BindRepeating(
       [](uint32_t if_index, const std::string& if_name,
          TCPClientSocket* sock) -> int {
-        return BindFdToInterface(if_index, if_name,
-                                 sock->SocketDescriptorForTesting());
+        SocketDescriptor fd = sock->SocketDescriptorForTesting();
+        return BindFdToInterface(if_index, if_name, fd, GetFdFamily(fd));
       },
       idx, std::move(name), base::Unretained(raw)));
   return socket;

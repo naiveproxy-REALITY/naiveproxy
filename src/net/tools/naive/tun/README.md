@@ -29,7 +29,20 @@ hop **must not** re-enter the tun, or you get an infinite loop.
 layer** using `bind-interface`. On Linux this is `SO_BINDTODEVICE`, on macOS
 `IP_BOUND_IF`, on Windows `IP_UNICAST_IF`. A socket bound this way ignores the
 routing table's default route, so `naive -> VPS` always leaves via the real NIC
-and never touches the tun -- **no per-server bypass route is needed**.
+and never touches the tun -- **no per-server bypass route is needed**. Both TCP
+and UDP outbound sockets are bound (so a `quic://` upstream is covered too);
+TLS/REALITY rides on an already-bound TCP socket.
+
+> **Windows caveat.** Unlike Linux `SO_BINDTODEVICE` (a *hard* bind: traffic to
+> an unreachable NIC is black-holed, never leaked), Windows `IP_UNICAST_IF` /
+> `IPV6_UNICAST_IF` is a routing **hint**. Windows still makes egress decisions
+> primarily by connectivity, so under some conditions the stack may send the
+> packet out a different (physical) NIC even though the hint points elsewhere.
+> In the tun-loop-prevention scenario this is normally harmless (the physical
+> NIC is exactly where we want `naive -> VPS` to go), but do not rely on
+> `bind-interface` on Windows as a hard confinement/kill-switch guarantee the
+> way you can on Linux. If you need a hard guarantee on Windows, add a
+> firewall rule pinning the VPS IP to the physical adapter.
 
 Set it to `"auto"` and `naive` will detect the physical interface itself (it
 opens a throwaway UDP socket to a public IP, reads the local address the kernel

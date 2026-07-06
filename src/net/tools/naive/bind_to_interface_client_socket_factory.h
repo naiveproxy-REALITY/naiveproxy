@@ -11,13 +11,20 @@
 
 namespace net {
 
-// A ClientSocketFactory that binds every outbound TCP socket it creates to a
-// fixed physical network interface (via SO_BINDTODEVICE / IP_BOUND_IF /
-// IP_UNICAST_IF depending on platform), applied through a before-connect
-// callback. This lets naive's connections to the upstream proxy / REALITY
-// server bypass a TUN device driven by an external tun2socks, without needing
-// any bypass routes. Datagram and SSL sockets are delegated to the default
-// factory (SSL wraps an already-bound transport socket).
+// A ClientSocketFactory that binds every outbound socket it creates to a fixed
+// physical network interface (via SO_BINDTODEVICE / IP_BOUND_IF / IP_UNICAST_IF
+// depending on platform). This lets naive's connections to the upstream proxy /
+// REALITY server bypass a TUN device driven by an external tun2socks, without
+// needing any bypass routes.
+//   - TCP: bound via a before-connect callback.
+//   - UDP (datagram): bound via BindToInterfaceUDPClientSocket, which creates
+//     and binds the fd before connect (closes the raw-UDP leak on `quic://`
+//     upstreams).
+//   - SSL: delegated to the default factory; it wraps an already-bound TCP
+//     transport socket, so the underlying fd is already bound.
+// NOTE: on Windows, IP(V6)_UNICAST_IF is a routing hint rather than a hard bind
+// (unlike Linux SO_BINDTODEVICE); the stack may still egress via another NIC
+// based on connectivity. See the TUN README for the Windows caveat.
 class BindToInterfaceClientSocketFactory : public ClientSocketFactory {
  public:
   explicit BindToInterfaceClientSocketFactory(const std::string& interface_name);
