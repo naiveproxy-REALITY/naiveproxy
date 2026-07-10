@@ -312,6 +312,12 @@ void NaiveUdpConnection::OnHandshakeSent(int result) {
     return;
   }
 
+  // A standard sing-box UoT server does NOT echo a handshake; it sends data
+  // frames straight back. Prime the return-direction framer to start decoding
+  // data frames directly (no leading handshake). We always send isConnect=false
+  // for SOCKS5 UDP ASSOCIATE, so the return frames carry per-packet addresses.
+  uot_framer_.InitAsDatagramReader(/*is_connect=*/false);
+
   // Now send the pending first-packet payload as a UoT data frame, carrying
   // its per-packet destination (isConnect=false mode). Note the payload may be
   // legitimately empty, so gate on the explicit validity flag, not emptiness.
@@ -387,11 +393,9 @@ void NaiveUdpConnection::OnServerReadComplete(int result) {
       // Need more bytes. The framer has stored them internally.
       break;
     }
-    if (uot_framer_.is_handshake()) {
-      // Server sends a handshake (echoing destination). Skip it —
-      // destination is already known from client's own handshake.
-      continue;
-    }
+    // Return frames are always data frames now (the framer was primed as a
+    // datagram reader in OnHandshakeSent; standard sing-box servers never echo
+    // a handshake).
     // UoT data frame → wrap in SOCKS5 UDP header → send to client.
     if (!client_addr_known_) {
       // Client hasn't sent anything yet; we don't know where to send.

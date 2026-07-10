@@ -101,6 +101,24 @@ class NaiveUotFramer {
   // Call payload() and destination() to retrieve the result.
   bool Feed(const uint8_t* data, size_t len, size_t* bytes_consumed);
 
+  // Initialize this framer as a DATAGRAM reader for the return (server->client)
+  // direction, i.e. one that does NOT expect a leading handshake frame.
+  //
+  // Standard sing-box UoT servers do not echo a handshake; after they read the
+  // client's request they send data frames directly. (Our earlier server sent a
+  // handshake echo, which was a non-standard deviation; both sides now follow
+  // the plain sing-box wire.) A return-direction framer must therefore start in
+  // the data-frame state: for isConnect=false each frame carries its own
+  // uot.AddrParser-encoded destination; for isConnect=true frames are bare
+  // length+payload with the destination fixed to the association target.
+  void InitAsDatagramReader(bool is_connect) {
+    is_connect_ = is_connect;
+    is_handshake_ = false;
+    handshake_done_ = true;
+    frame_addr_parsed_ = false;
+    SetReadState(ReadState::kDataLength1);
+  }
+
   // After Feed() returns true:
   // - For handshake: destination() is the parsed handshake destination.
   // - For data: payload() is the UDP packet data, and destination() is the
