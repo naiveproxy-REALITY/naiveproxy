@@ -19,8 +19,8 @@ The client runs locally (your machine / router). The server must be on a
   "proxy":  "https://USER:PASS@YOUR_VPS_IP:8443",
   "reality": {
     "server_name": "www.apple.com",
-    "public_key":  "<base64 X25519 public key from the server>",
-    "short_id":    "<base64 short id, matches the server>",
+    "public_key":  "<base64url X25519 public key from the server>",
+    "short_id":    "<hex short id, matches the server exactly>",
     "version":     [1, 0, 0]
   }
 }
@@ -73,8 +73,8 @@ intended; it just means your keys are wrong.
 | Field | Meaning |
 |-------|---------|
 | `server_name` | The SNI to present = the mirror/dest host the server borrows (e.g. `www.apple.com`). Must match the server's `mirror_target` host. |
-| `public_key` | Base64 of the server's X25519 **public** key (32 bytes). |
-| `short_id` | Base64 (1..8 bytes), matches the server. |
+| `public_key` | base64url of the server's X25519 **public** key (32 bytes). Same string Xray/sing-box print (no conversion). |
+| `short_id` | Hex string (0..16 hex chars = 0..8 bytes), copied verbatim from the server config. |
 | `version` | `[1, 0, 0]`. |
 
 ### Optional / tuning
@@ -135,8 +135,8 @@ cd hev-socks5-tunnel && make          # -> bin/hev-socks5-tunnel
   "proxy":  "https://USER:PASS@YOUR_VPS_IP:8443",
   "reality": {
     "server_name": "www.apple.com",
-    "public_key":  "<base64 X25519 public key>",
-    "short_id":    "<base64 short id>",
+    "public_key":  "<base64url X25519 public key>",
+    "short_id":    "<hex short id>",
     "version":     [1, 0, 0]
   },
   "bind-interface": "auto"            // detect the physical NIC; bind outbound

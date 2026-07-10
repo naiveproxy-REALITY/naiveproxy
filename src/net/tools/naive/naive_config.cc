@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include "base/base64.h"
+#include "base/base64url.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
@@ -339,21 +340,31 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
         reality.server_name = *s;
       }
       if (const std::string* s = rd->FindString("public_key")) {
+        // REALITY public keys are distributed as base64url (Xray/sing-box use
+        // Go's base64.RawURLEncoding, no padding). Accept with or without
+        // padding so a key copied from either tool works verbatim.
         std::string decoded;
-        if (base::Base64Decode(*s, &decoded) && decoded.size() == 32) {
+        if (base::Base64UrlDecode(
+                *s, base::Base64UrlDecodePolicy::IGNORE_PADDING, &decoded) &&
+            decoded.size() == 32) {
           reality.server_public_key.assign(decoded.begin(), decoded.end());
         } else {
-          std::cerr << "Invalid reality.public_key (expected base64 32 bytes)"
+          std::cerr << "Invalid reality.public_key (expected base64url 32 bytes)"
                     << std::endl;
           return false;
         }
       }
       if (const std::string* s = rd->FindString("short_id")) {
+        // REALITY short_ids are hex strings (Xray/sing-box convention), 0..16
+        // hex chars = 0..8 bytes. Decode and right-pad with zeros to 8 bytes,
+        // exactly as sing-box does (ShortIds is a fixed [8]byte, hex.Decode
+        // fills the prefix, the rest stays zero).
         std::string decoded;
-        if (base::Base64Decode(*s, &decoded) && decoded.size() == 8) {
+        if (base::HexStringToString(*s, &decoded) && decoded.size() <= 8) {
+          decoded.resize(8, '\0'); // zero-pad the high bytes
           reality.short_id.assign(decoded.begin(), decoded.end());
         } else {
-          std::cerr << "Invalid reality.short_id (expected base64 8 bytes)"
+          std::cerr << "Invalid reality.short_id (expected hex, 0..8 bytes)"
                     << std::endl;
           return false;
         }
