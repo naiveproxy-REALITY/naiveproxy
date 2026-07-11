@@ -1,4 +1,4 @@
-// Copyright 2024 NaiveProxy-REALITY contributors.
+// Copyright 2026 justinwoo280 <justinwoo280@gmail.com>.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "net/tools/naive/bind_to_interface_client_socket_factory.h"

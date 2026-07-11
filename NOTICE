@@ -1,0 +1,117 @@
+NOTICE
+======
+
+This repository is a fork of NaiveProxy (https://github.com/klzgrad/naiveproxy),
+which itself embeds and builds upon the Chromium source tree. The root LICENSE
+file (BSD-3-Clause, Copyright The Chromium Authors) governs the project as a
+whole, except where individual files or subtrees carry their own license
+headers (see below).
+
+Contributions by justinwoo280 <justinwoo280@gmail.com>
+------------------------------------------------------
+
+Copyright 2026 justinwoo280 <justinwoo280@gmail.com>.
+
+The intent of these contributions is to be released under the same
+BSD-3-Clause license as the upstream NaiveProxy / Chromium project (see the
+root LICENSE file). Where a contribution is an original, newly-authored file,
+it is licensed under BSD-3-Clause accordingly.
+
+Some contributions, however, are modifications to pre-existing third-party
+files that are NOT under BSD-3-Clause. Modifications to such files necessarily
+remain under the license of the file being modified; they cannot be, and are
+not, relicensed under BSD-3-Clause. The mapping is:
+
+1. Newly-authored files (BSD-3-Clause)
+   Files authored from scratch in this fork (verified by git history to be
+   authored wholly by justinwoo280), licensed under BSD-3-Clause. Each carries
+   a full BSD-3-Clause header naming justinwoo280:
+
+   UDP-over-TCP (UoT), absent from upstream NaiveProxy:
+     src/net/tools/naive/naive_uot_framer.h
+     src/net/tools/naive/naive_uot_framer.cc
+     src/net/tools/naive/naive_uot_framer_unittest.cc
+     src/net/tools/naive/naive_udp_connection.h
+     src/net/tools/naive/naive_udp_connection.cc
+
+   bind-interface (outbound socket binding for TUN bypass):
+     src/net/tools/naive/bind_to_interface_client_socket_factory.h
+     src/net/tools/naive/bind_to_interface_client_socket_factory.cc
+
+   Independent-implementation statement (UoT).
+   The UDP-over-TCP (UoT) files above implement the SAME ON-THE-WIRE PROTOCOL
+   as sing-box / the sagernet/sing library (GPL-3.0), so that the two
+   interoperate. They are NOT a derivative work of that GPL-3.0 code:
+
+     - A wire format / network protocol is a method of operation and is not
+       protected by copyright; anyone may implement it independently.
+     - These files are an original, from-scratch C++ implementation. Their
+       structure and expression differ substantially from the Go original:
+       the Go code uses blocking sequential reads (binary.Read / io.ReadFull)
+       and delegates address coding to a shared serializer
+       (M.SocksaddrSerializer / uot.AddrParser); this implementation uses an
+       explicit incremental state machine (NaiveUotFramer::Feed with a
+       ReadState enum) and its own hand-written address codecs. No source code
+       was copied or translated.
+     - References to sing-box type names in code comments are interoperability
+       documentation only (describing the wire bytes to match); they do not
+       incorporate any GPL-3.0 source.
+
+   Accordingly these files are licensed under BSD-3-Clause and the GPL-3.0 of
+   sing-box / sagernet/sing does not extend to them.
+
+2. Modifications to existing BSD-3-Clause files (BSD-3-Clause)
+   The files below are pre-existing Chromium / klzgrad NaiveProxy files
+   (already BSD-3-Clause). justinwoo280 inserted portions into them (UDP
+   ASSOCIATE, UDP dispatch, REALITY wiring, XHTTP/REALITY/UoT config parsing).
+   The original headers are kept; a "Portions Copyright 2026 justinwoo280"
+   note is added beneath, under the same BSD-3-Clause license. Line ranges are
+   attributable via git blame.
+
+   naive tool (SOCKS5 UDP ASSOCIATE, UDP dispatch, config parsing):
+     src/net/tools/naive/socks5_server_socket.h
+     src/net/tools/naive/socks5_server_socket.cc
+     src/net/tools/naive/naive_proxy.h
+     src/net/tools/naive/naive_proxy.cc
+     src/net/tools/naive/naive_proxy_bin.cc
+     src/net/tools/naive/naive_config.h
+     src/net/tools/naive/naive_config.cc
+
+   //net core (REALITY client wiring):
+     src/net/ssl/ssl_config.h
+     src/net/ssl/ssl_config.cc
+     src/net/socket/ssl_client_socket_impl.cc
+     src/net/socket/connect_job_params_factory.cc
+
+3. Modifications to third-party files (Apache-2.0)
+   The REALITY client-side changes below were made to pre-existing BoringSSL
+   files that are licensed under the Apache License, Version 2.0. These
+   modifications are contributed under, and remain governed by, Apache-2.0
+   (the same license as the files they modify). Each such file carries a
+   "Portions Copyright 2026 justinwoo280" note beneath its original license
+   header:
+
+     src/third_party/boringssl/src/ssl/ssl_lib.cc
+     src/third_party/boringssl/src/ssl/internal.h
+     src/third_party/boringssl/src/ssl/extensions.cc
+     src/third_party/boringssl/src/ssl/ssl_key_share.cc
+     src/third_party/boringssl/src/ssl/handshake_client.cc
+     src/third_party/boringssl/src/include/openssl/ssl.h
+
+Note on non-attribution.
+   Some files that mention "reality" or "preamble" (e.g.
+   naive_proxy_delegate.cc, preamble_getter.cc) were verified by git blame to
+   contain NO lines authored by justinwoo280; they remain solely under their
+   existing klzgrad / Chromium copyright and are intentionally NOT signed here.
+
+Summary
+-------
+
+- Whole project: BSD-3-Clause (root LICENSE), except per-file/per-subtree
+  headers.
+- justinwoo280's newly-authored files: BSD-3-Clause.
+- justinwoo280's portions in existing Chromium/klzgrad files: BSD-3-Clause.
+- justinwoo280's modifications to BoringSSL (Apache-2.0) files: Apache-2.0.
+
+Nothing in this NOTICE grants any right to relicense third-party code; the
+original licenses of all upstream files remain in force.

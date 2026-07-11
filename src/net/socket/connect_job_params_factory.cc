@@ -1,6 +1,9 @@
 // Copyright 2024 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// Portions Copyright 2026 justinwoo280 <justinwoo280@gmail.com>,
+// governed by the same BSD-style license (see the LICENSE file).
 
 #include "net/socket/connect_job_params_factory.h"
 

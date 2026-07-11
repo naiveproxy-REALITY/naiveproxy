@@ -2,6 +2,10 @@
 // Copyright 2018 klzgrad <kizdiv@gmail.com>. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// Portions Copyright 2026 justinwoo280 <justinwoo280@gmail.com>,
+// governed by the same BSD-style license (see the LICENSE file).
+
 #ifndef NET_TOOLS_NAIVE_NAIVE_PROXY_H_
 #define NET_TOOLS_NAIVE_NAIVE_PROXY_H_
 

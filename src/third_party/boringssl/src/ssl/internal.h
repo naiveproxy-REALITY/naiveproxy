@@ -13,6 +13,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Portions Copyright 2026 justinwoo280 <justinwoo280@gmail.com>,
+// licensed under the Apache License, Version 2.0 (the same terms as above).
 
 #ifndef OPENSSL_HEADER_SSL_INTERNAL_H
 #define OPENSSL_HEADER_SSL_INTERNAL_H
