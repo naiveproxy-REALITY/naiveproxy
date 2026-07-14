@@ -901,12 +901,20 @@ int SSLClientSocketImpl::Init() {
         return ERR_INVALID_ECH_CONFIG_LIST;
       }
     }
-
-    // REALITY requires a fixed extension order for its authentication; do not
-    // permute. (JA4 sorts extensions before hashing, so this does not change
-    // the fingerprint.)
-    SSL_set_permute_extensions(ssl_.get(), 1);
   }
+
+  // Randomize the ClientHello extension order to match real Chrome (110+),
+  // which permutes extensions per-connection. This is safe under REALITY:
+  // its authentication does NOT depend on extension order. REALITY encrypts
+  // the legacy session_id (a fixed-offset field that precedes the extensions
+  // block) and seals it with AES-GCM over the fully-serialized ClientHello as
+  // AAD, after the extensions have already been laid out. So the auth succeeds
+  // regardless of the (permuted) extension order. Keeping the order FIXED under
+  // REALITY, in contrast, is itself a passive fingerprint: real Chrome's order
+  // varies per connection while a fixed order does not. (JA4 sorts extensions
+  // before hashing, so this does not change JA4 either way; the tell is the
+  // per-connection wire-order stability, which we eliminate by permuting.)
+  SSL_set_permute_extensions(ssl_.get(), 1);
 
   if (ssl_config_.reality.enabled) {
     if (ssl_config_.reality.server_public_key.size() == 32 &&
