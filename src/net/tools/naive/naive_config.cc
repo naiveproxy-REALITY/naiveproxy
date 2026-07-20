@@ -23,6 +23,12 @@
 
 namespace net {
 namespace {
+// Default REALITY client version (session_id plaintext[0:3]) used when the
+// config omits "version". Modern Xray-core embeds its own version number here;
+// this tracks a recent release. Servers pinning MinClientVer/MaxClientVer may
+// require the user to set "version" explicitly to match their range.
+constexpr uint8_t kDefaultRealityVersion[3] = {26, 7, 11};
+
 ProxyServer MyProxyUriToProxyServer(std::string_view uri) {
   if (uri.compare(0, 7, "quic://") == 0) {
     return ProxySchemeHostAndPortToProxyServer(ProxyServer::SCHEME_QUIC,
@@ -374,17 +380,34 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
         }
       }
       if (const base::ListValue* ver = rd->FindList("version")) {
-        if (ver->size() == 3) {
-          reality.version.resize(3);
-          for (size_t i = 0; i < 3; i++) {
-            auto val = (*ver)[i].GetIfInt();
-            if (!val || *val < 0 || *val > 255) {
-              std::cerr << "Invalid reality.version" << std::endl;
-              return false;
-            }
-            reality.version[i] = static_cast<uint8_t>(*val);
-          }
+        if (ver->size() != 3) {
+          std::cerr << "Invalid reality.version (expected a 3-element list)"
+                    << std::endl;
+          return false;
         }
+        reality.version.resize(3);
+        for (size_t i = 0; i < 3; i++) {
+          auto val = (*ver)[i].GetIfInt();
+          if (!val || *val < 0 || *val > 255) {
+            std::cerr << "Invalid reality.version" << std::endl;
+            return false;
+          }
+          reality.version[i] = static_cast<uint8_t>(*val);
+        }
+      }
+      // Apply a default client version when the user omits "version". Without
+      // this, reality.version stays empty and the SSL layer silently SKIPS
+      // REALITY entirely (SSL_set_reality_client_config requires a 3-byte
+      // version), disabling auth without any error. The default tracks a recent
+      // Xray-core release; servers pinning MinClientVer/MaxClientVer may require
+      // an explicit "version" matching their range.
+      if (reality.version.empty()) {
+        reality.version = {kDefaultRealityVersion[0], kDefaultRealityVersion[1],
+                           kDefaultRealityVersion[2]};
+        LOG(INFO) << "REALITY: no explicit version; defaulting to "
+                  << static_cast<int>(reality.version[0]) << "."
+                  << static_cast<int>(reality.version[1]) << "."
+                  << static_cast<int>(reality.version[2]);
       }
       LOG(INFO) << "REALITY config: server_name=" << reality.server_name;
     }
