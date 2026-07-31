@@ -47,7 +47,11 @@ SSL3_STATE::SSL3_STATE()
       used_hello_retry_request(false),
       was_key_usage_invalid(false) {}
 
-SSL3_STATE::~SSL3_STATE() {}
+SSL3_STATE::~SSL3_STATE() {
+  // The REALITY authentication key is long-lived key material derived from the
+  // configured X25519 static key; do not leave it in freed heap memory.
+  OPENSSL_cleanse(reality_auth_key, sizeof(reality_auth_key));
+}
 
 bool tls_new(SSL *ssl) {
   UniquePtr<SSL3_STATE> s3 = MakeUnique<SSL3_STATE>();

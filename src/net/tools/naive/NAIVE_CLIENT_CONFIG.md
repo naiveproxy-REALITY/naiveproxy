@@ -56,6 +56,16 @@ prober — you get transparently proxied to the real site (you'll see the real
 site's page, not your tunnel). That is the anti-probing fallback working as
 intended; it just means your keys are wrong.
 
+In that case the client rejects the connection with
+`ERR_REALITY_AUTHENTICATION_FAILED` (-1000) and logs `REALITY: server
+authentication failed`. The client authenticates the server by checking that the
+disguise certificate's signature field equals
+`HMAC-SHA512(auth_key, leaf_ed25519_public_key)`, which only a peer holding the
+matching `private_key` can produce. The same error therefore appears if something
+on the path terminates the TLS session, or if the connection is redirected to the
+`mirror_target` itself — in both cases you get a real certificate instead of the
+expected MAC. A wrong `reality.public_key` looks identical from the client's side.
+
 ---
 
 ## Fields reference

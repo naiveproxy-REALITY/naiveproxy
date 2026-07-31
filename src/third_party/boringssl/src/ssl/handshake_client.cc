@@ -316,6 +316,14 @@ static bool reality_encrypt_client_session_id_inner(SSL_HANDSHAKE *hs,
 
   OPENSSL_memcpy(data + 39, ciphertext, 32);
   hs->session_id.CopyFrom(Span(ciphertext, 32));
+
+  // Retain the derived key so the application can authenticate the server. In
+  // REALITY the certificate chain is a disguise and carries no trust; the only
+  // proof that the peer holds the configured private key is that its leaf's
+  // signature field equals HMAC-SHA512(auth_key, leaf_ed25519_public_key). See
+  // SSL_get_reality_auth_key.
+  OPENSSL_memcpy(ssl->s3->reality_auth_key, auth_key, 32);
+  ssl->s3->reality_auth_key_valid = true;
   return true;
 }
 

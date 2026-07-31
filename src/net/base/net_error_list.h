@@ -22,6 +22,8 @@
 //   700-799 Certificate manager errors
 //   800-899 DNS resolver errors
 //   900-999 Blob errors
+//  1000-1099 REALITY errors (naiveproxy-REALITY fork; deliberately outside
+//            upstream's ranges so a Chromium rebase cannot collide)
 
 // LINT.IfChange
 
@@ -1136,6 +1138,20 @@ NET_ERROR(BLOB_REFERENCED_BLOB_BROKEN, -905)
 // A file that we referenced during construction is not accessible to the
 // renderer trying to create the blob.
 NET_ERROR(BLOB_REFERENCED_FILE_UNAVAILABLE, -906)
+
+// REALITY-specific errors (naiveproxy-REALITY fork).
+//
+// Deliberately placed well past upstream's ranges so that rebasing onto a newer
+// Chromium cannot collide with a newly assigned upstream error code.
+
+// REALITY peer authentication failed: the server's disguise leaf did not carry
+// HMAC-SHA512(auth_key, leaf_ed25519_public_key) in its signature field, so the
+// peer does not hold the configured REALITY private key. Either the connection
+// was intercepted, or it was redirected to the mirror target (which answers with
+// its own real certificate). This is always fatal and is never bypassable by
+// ignore_certificate_errors, because bypassing it would leave the connection with
+// no server authentication at all.
+NET_ERROR(REALITY_AUTHENTICATION_FAILED, -1000)
 
 // CAUTION: Before adding errors here, please check the ranges of errors written
 // in the top of this file.

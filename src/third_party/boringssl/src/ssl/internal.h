@@ -3014,6 +3014,19 @@ struct SSL3_STATE {
   // srtp_profile is the selected SRTP protection profile for
   // DTLS-SRTP.
   const SRTP_PROTECTION_PROFILE *srtp_profile = nullptr;
+
+  // reality_auth_key is the REALITY authentication key derived while writing the
+  // ClientHello: HKDF-SHA256(X25519(client_share_priv, server_pub), salt =
+  // client_random[:20], info = "REALITY"). It is retained so the application can
+  // authenticate the server, which in REALITY is the *only* thing that proves the
+  // peer holds the configured private key: the server's disguise leaf carries
+  // HMAC-SHA512(reality_auth_key, ed25519_pub) in place of its signature, and a
+  // mismatch means the connection was terminated by something other than the
+  // REALITY server (MITM, or a redirect to the mirror target itself).
+  //
+  // Only set on REALITY client connections; |reality_auth_key_valid| gates it.
+  uint8_t reality_auth_key[32] = {0};
+  bool reality_auth_key_valid = false;
 };
 
 // lengths of messages

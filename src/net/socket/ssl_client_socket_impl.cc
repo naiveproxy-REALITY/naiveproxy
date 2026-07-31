@@ -17,6 +17,7 @@
 #include <string_view>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/containers/span.h"
 #include "base/containers/to_vector.h"
 #include "base/feature_list.h"
@@ -70,8 +71,11 @@
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
 #include "third_party/boringssl/src/include/openssl/err.h"
 #include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/hmac.h"
 #include "third_party/boringssl/src/include/openssl/mem.h"
+#include "third_party/boringssl/src/include/openssl/sha.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
+#include "third_party/boringssl/src/pki/parse_certificate.h"
 
 namespace net {
 
@@ -86,6 +90,75 @@ const int kCertVerifyPending = 1;
 
 // Default size of the internal BoringSSL buffers.
 const int kDefaultOpenSSLBufferSize = 17 * 1024;
+
+// Authenticates a REALITY server from its disguise leaf.
+//
+// REALITY's certificate chain conveys no trust: the server mints a throwaway
+// self-signed Ed25519 leaf per connection purely so the handshake has the shape
+// of a normal TLS handshake. What authenticates the peer is that the leaf's
+// signature field has been overwritten with
+//
+//     HMAC-SHA512(auth_key, leaf_ed25519_public_key)
+//
+// where auth_key is the HKDF output both sides derive from
+// X25519(client_key_share, reality_server_public_key). Only a peer holding the
+// configured REALITY private key can produce it.
+//
+// This is the whole of server authentication under REALITY. Without it the
+// connection is unauthenticated: anything that terminates the TLS session —
+// an on-path interceptor, or a redirect to the mirror target, which answers with
+// its own genuine certificate — would be accepted, and the proxy credentials and
+// traffic would be handed to it. Matches the Go client's check in
+// Xray-core/transport/internet/reality/reality.go.
+//
+// `leaf_der` is the peer's leaf certificate as sent. Returns false on any parse
+// failure, a non-Ed25519 key, or an HMAC mismatch.
+bool VerifyRealityServerLeaf(base::span<const uint8_t> auth_key,
+                             base::span<const uint8_t> leaf_der) {
+  bssl::der::Input tbs_certificate_tlv;
+  bssl::der::Input signature_algorithm_tlv;
+  bssl::der::BitString signature_value;
+  bssl::ParsedTbsCertificate tbs;
+  if (!bssl::ParseCertificate(bssl::der::Input(leaf_der), &tbs_certificate_tlv,
+                              &signature_algorithm_tlv, &signature_value,
+                              /*out_errors=*/nullptr) ||
+      !bssl::ParseTbsCertificate(tbs_certificate_tlv,
+                                 x509_util::DefaultParseCertificateOptions(),
+                                 &tbs, /*errors=*/nullptr)) {
+    return false;
+  }
+
+  // The MAC replaced an Ed25519 signature, so it occupies exactly 64 bytes with
+  // no unused bits.
+  if (signature_value.unused_bits() != 0 || signature_value.bytes().size() != 64) {
+    return false;
+  }
+
+  // Extract the raw Ed25519 public key from the SubjectPublicKeyInfo.
+  CBS spki;
+  CBS_init(&spki, tbs.spki_tlv.data(), tbs.spki_tlv.size());
+  bssl::UniquePtr<EVP_PKEY> pubkey(EVP_parse_public_key(&spki));
+  if (pubkey == nullptr || CBS_len(&spki) != 0 ||
+      EVP_PKEY_id(pubkey.get()) != EVP_PKEY_ED25519) {
+    return false;
+  }
+  uint8_t raw_pubkey[32];
+  size_t raw_pubkey_len = sizeof(raw_pubkey);
+  if (!EVP_PKEY_get_raw_public_key(pubkey.get(), raw_pubkey, &raw_pubkey_len) ||
+      raw_pubkey_len != sizeof(raw_pubkey)) {
+    return false;
+  }
+
+  uint8_t expected[SHA512_DIGEST_LENGTH];
+  unsigned expected_len = 0;
+  if (HMAC(EVP_sha512(), auth_key.data(), auth_key.size(), raw_pubkey,
+           sizeof(raw_pubkey), expected, &expected_len) == nullptr ||
+      expected_len != 64) {
+    return false;
+  }
+
+  return CRYPTO_memcmp(expected, signature_value.bytes().data(), 64) == 0;
+}
 
 base::DictValue NetLogPrivateKeyOperationParams(uint16_t algorithm,
                                                 SSLPrivateKey* key) {
@@ -1156,6 +1229,48 @@ ssl_verify_result_t SSLClientSocketImpl::VerifyCert() {
                                  NetLogX509CertificateList(server_cert_.get()));
   });
 
+  // REALITY authenticates the peer from the disguise leaf's MAC, not from the
+  // chain. Do that here and skip CertVerifier entirely: the leaf is a throwaway
+  // self-signed certificate that no path builder can or should validate, and its
+  // MAC is a stronger statement than any chain would be. Run before every other
+  // branch below so that no configuration — allowed-bad-certs,
+  // ignore_certificate_errors, ECH name override — can reach application data
+  // without the peer having proved possession of the REALITY private key.
+  if (ssl_config_.reality.enabled) {
+    // BoringSSL downgrades ssl_verify_invalid to ssl_verify_ok when verify_mode
+    // is SSL_VERIFY_NONE (ssl/handshake.cc), which would silently turn the check
+    // below into a no-op and leave the connection with no server authentication
+    // at all. This socket always installs its custom verify with
+    // SSL_VERIFY_PEER; assert that rather than trust it.
+    CHECK_NE(SSL_get_verify_mode(ssl_.get()), SSL_VERIFY_NONE);
+
+    const STACK_OF(CRYPTO_BUFFER)* peer_certs =
+        SSL_get0_peer_certificates(ssl_.get());
+    uint8_t auth_key[32] = {0};
+    bool authenticated = false;
+    if (peer_certs != nullptr && sk_CRYPTO_BUFFER_num(peer_certs) > 0 &&
+        SSL_get_reality_auth_key(ssl_.get(), auth_key) == 1) {
+      authenticated = VerifyRealityServerLeaf(
+          auth_key,
+          x509_util::CryptoBufferAsSpan(sk_CRYPTO_BUFFER_value(peer_certs, 0)));
+    }
+    OPENSSL_cleanse(auth_key, sizeof(auth_key));
+    if (!authenticated) {
+      // The peer holds a different key, or none. Do not fall back to ordinary
+      // certificate verification: succeeding there would only prove we reached
+      // *some* correctly-certified host, which is exactly what a redirect to the
+      // mirror target looks like.
+      LOG(ERROR) << "REALITY: server authentication failed (received a real "
+                    "certificate; possible interception or redirection)";
+      OpenSSLPutNetError(FROM_HERE, ERR_REALITY_AUTHENTICATION_FAILED);
+      return ssl_verify_invalid;
+    }
+    server_cert_verify_result_.Reset();
+    server_cert_verify_result_.verified_cert = server_cert_;
+    cert_verification_result_ = OK;
+    return HandleVerifyResult();
+  }
+
   auto server_trust_anchor_ids = GetServerTrustAnchorIDs();
   if (!server_trust_anchor_ids.empty()) {
     net_log_.AddEvent(
@@ -1305,7 +1420,11 @@ ssl_verify_result_t SSLClientSocketImpl::HandleVerifyResult() {
       // and map all bypassable errors to fatal ones.
       result = ERR_ECH_FALLBACK_CERTIFICATE_INVALID;
     }
-    if (ssl_config_.ignore_certificate_errors || ssl_config_.reality.enabled) {
+    // Note: REALITY connections never reach here. VerifyCert() authenticates the
+    // peer from the disguise leaf's MAC and short-circuits before CertVerifier
+    // runs, so there is no certificate error to bypass — and nothing that could
+    // turn a failed REALITY authentication into OK.
+    if (ssl_config_.ignore_certificate_errors) {
       result = OK;
     }
   }

@@ -5304,6 +5304,18 @@ OPENSSL_EXPORT int SSL_set_reality_client_config(
     SSL *ssl, const uint8_t server_public_key[32],
     const uint8_t short_id[8], const uint8_t version[3]);
 
+// SSL_get_reality_auth_key writes the 32-byte REALITY authentication key derived
+// while writing the ClientHello into |out|. Returns 1 on success and 0 if REALITY
+// is not enabled on |ssl| or the ClientHello has not been written yet.
+//
+// The caller needs this to authenticate the server: REALITY's certificate chain
+// is a disguise and conveys no trust, so the server proves possession of the
+// configured private key by putting HMAC-SHA512(auth_key, leaf_ed25519_pub) in
+// its leaf's signature field. A mismatch means the peer is not the REALITY server
+// (an interceptor, or a redirect to the mirror target) and the connection must be
+// abandoned. |out| is key material; cleanse it after use.
+OPENSSL_EXPORT int SSL_get_reality_auth_key(const SSL *ssl, uint8_t out[32]);
+
 // SSL_CTX_set_dos_protection_cb sets a callback that is called once the
 // resumption decision for a ClientHello has been made. It can return one to
 // allow the handshake to continue or zero to cause the handshake to abort.

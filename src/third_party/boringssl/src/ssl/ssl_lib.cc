@@ -3170,6 +3170,14 @@ int SSL_set_reality_client_config(SSL *ssl, const uint8_t server_public_key[32],
   return 1;
 }
 
+int SSL_get_reality_auth_key(const SSL *ssl, uint8_t out[32]) {
+  if (ssl->s3 == nullptr || !ssl->s3->reality_auth_key_valid) {
+    return 0;
+  }
+  OPENSSL_memcpy(out, ssl->s3->reality_auth_key, 32);
+  return 1;
+}
+
 int32_t SSL_get_ticket_age_skew(const SSL *ssl) {
   return ssl->s3->ticket_age_skew;
 }
