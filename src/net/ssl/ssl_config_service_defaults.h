@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "net/base/net_export.h"
+#include "net/ssl/reality_config.h"
 #include "net/ssl/ssl_config_service.h"
 
 namespace net {
@@ -18,6 +19,9 @@ namespace net {
 class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
  public:
   SSLConfigServiceDefaults();
+  explicit SSLConfigServiceDefaults(EchMode ech_mode);
+  SSLConfigServiceDefaults(EchMode ech_mode,
+                          std::optional<RealityConfig> reality);
 
   SSLConfigServiceDefaults(const SSLConfigServiceDefaults&) = delete;
   SSLConfigServiceDefaults& operator=(const SSLConfigServiceDefaults&) = delete;
@@ -26,6 +30,8 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
 
   // Returns the default SSL config settings.
   SSLContextConfig GetSSLContextConfig() override;
+  EchMode GetEchMode(std::string_view hostname) const override;
+  const RealityConfig* GetRealityConfig() const override;
 
   bool CanShareConnectionWithClientCerts(
       std::string_view hostname) const override;
@@ -33,6 +39,8 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
  private:
   // Default value of prefs.
   const SSLContextConfig default_config_;
+  const EchMode ech_mode_ = EchMode::kOpportunistic;
+  const std::optional<RealityConfig> reality_;
 };
 
 }  // namespace net

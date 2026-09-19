@@ -354,11 +354,18 @@ constexpr std::array<const char*, 6> kStaticRootCertFiles = {
 
 // Possible directories with certificate files; stop after successfully
 // reading at least one file from a directory.
+#if BUILDFLAG(IS_ANDROID)
+constexpr std::array<const char*, 2> kStaticRootCertDirs = {
+    "/apex/com.android.conscrypt/cacerts",  // Android 14 and later.
+    "/system/etc/security/cacerts",        // Earlier Android releases.
+};
+#else
 constexpr std::array<const char*, 3> kStaticRootCertDirs = {
     "/etc/ssl/certs",      // SLES10/SLES11, https://golang.org/issue/12139
     "/etc/pki/tls/certs",  // Fedora/RHEL
     "/system/etc/security/cacerts",  // Android
 };
+#endif
 
 // The environment variable which identifies where to locate the SSL
 // certificate file. If set this overrides the system default.

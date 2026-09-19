@@ -12,6 +12,7 @@
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/notreached.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,11 +20,13 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/features.h"
+#include "net/base/http_user_agent_settings.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_response_body_drainer.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_stream_pool.h"
+#include "net/http/reality_fallback.h"
 #include "net/http/url_security_manager.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/quic/platform/impl/quic_chromium_clock.h"
@@ -227,6 +230,8 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
   http_stream_pool_ = std::make_unique<HttpStreamPool>(
       this,
       /*cleanup_on_ip_address_change=*/!params.ignore_ip_address_changes);
+  ssl_client_context_.SetRealityFallbackCallback(base::BindRepeating(
+      &HttpNetworkSession::StartRealityFallback, base::Unretained(this)));
 #if BUILDFLAG(IS_WIN)
   base::PowerMonitor::GetInstance()->AddPowerSuspendObserver(this);
 #endif
@@ -241,9 +246,48 @@ HttpNetworkSession::~HttpNetworkSession() {
     http_stream_pool_->OnShuttingDown();
   }
   response_drainers_.clear();
+  reality_fallbacks_.clear();
+  ssl_client_context_.SetRealityFallbackCallback({});
   // TODO(bnc): CloseAllSessions() is also called in SpdySessionPool destructor,
   // one of the two calls should be removed.
   spdy_session_pool_.CloseAllSessions();
+}
+
+void HttpNetworkSession::StartRealityFallback(
+    std::unique_ptr<SSLClientSocket> socket,
+    const HostPortPair& host_and_port,
+    const LoadTimingInfo::ConnectTiming& connect_timing) {
+  // A private pool uses the same HTTP/2 settings as the normal engine, while
+  // making it impossible for an application transaction to acquire this socket.
+  std::unique_ptr<SpdySessionPool> pool;
+  if (socket->GetNegotiatedProtocol() == NextProto::kProtoHTTP2) {
+    pool = std::make_unique<SpdySessionPool>(
+        context_.host_resolver, &ssl_client_context_,
+        context_.http_server_properties, context_.transport_security_state,
+        context_.quic_context->params()->supported_versions,
+        params_.enable_spdy_ping_based_connection_checking,
+        params_.enable_http2, /*is_quic_enabled=*/false,
+        params_.spdy_session_max_recv_window_size,
+        params_.spdy_session_max_queued_capped_frames,
+        AddDefaultHttp2Settings(params_.http2_settings),
+        params_.enable_http2_settings_grease, params_.greased_http2_frame,
+        params_.http2_end_stream_with_data_frame, params_.enable_priority_update,
+        params_.spdy_go_away_on_ip_change, params_.time_func,
+        context_.network_quality_estimator, !params_.ignore_ip_address_changes);
+  }
+  auto fallback = std::make_unique<RealityFallback>(
+      std::move(pool), base::BindOnce(&HttpNetworkSession::RemoveRealityFallback,
+                                      base::Unretained(this)));
+  auto* ptr = fallback.get();
+  reality_fallbacks_.insert(std::move(fallback));
+  ptr->Start(std::move(socket), host_and_port, connect_timing,
+             context_.http_user_agent_settings
+                 ? context_.http_user_agent_settings->GetUserAgent()
+                 : "Chrome");
+}
+
+void HttpNetworkSession::RemoveRealityFallback(RealityFallback* fallback) {
+  reality_fallbacks_.erase(reality_fallbacks_.find(fallback));
 }
 
 void HttpNetworkSession::StartResponseDrainer(
@@ -350,7 +394,8 @@ base::Value HttpNetworkSession::QuicInfoToValue() const {
 }
 
 void HttpNetworkSession::CloseAllConnections(int net_error,
-                                             const char* net_log_reason_utf8) {
+                                              const char* net_log_reason_utf8) {
+  reality_fallbacks_.clear();
   normal_socket_pool_manager_->FlushSocketPoolsWithError(net_error,
                                                          net_log_reason_utf8);
   websocket_socket_pool_manager_->FlushSocketPoolsWithError(

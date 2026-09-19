@@ -21,6 +21,20 @@ typedef struct stream_engine stream_engine;
 
 // Additional Cronet C API not generated from cronet.idl.
 
+// Requires ECH for every TLS connection in this engine. Must be set before
+// StartWithParams. Returns false if the engine has already started. Strict ECH
+// currently supports TCP only: starting with enable_quic=true is rejected.
+CRONET_EXPORT bool Cronet_Engine_SetStrictECH(Cronet_EnginePtr engine,
+                                            bool enabled);
+
+// Requires REALITY authentication for this engine's TLS connections. The engine
+// must be dedicated to one endpoint. Call before StartWithParams, with a 32-byte
+// X25519 public key and eight-byte short ID. QUIC and Strict ECH are incompatible.
+// Authenticated peers omitting ALPN use h2 if offered by the client.
+CRONET_EXPORT bool Cronet_Engine_SetReality(Cronet_EnginePtr engine,
+                                          const uint8_t* public_key,
+                                          const uint8_t* short_id);
+
 // Sets net::CertVerifier* raw_mock_cert_verifier for testing of Cronet_Engine.
 // Must be called before Cronet_Engine_InitWithParams().
 CRONET_EXPORT void Cronet_Engine_SetMockCertVerifierForTesting(

@@ -73,6 +73,7 @@ SSL_HANDSHAKE::SSL_HANDSHAKE(SSL *ssl_arg)
 }
 
 SSL_HANDSHAKE::~SSL_HANDSHAKE() {
+  OPENSSL_cleanse(reality_auth_key.data(), reality_auth_key.size());
   ssl->ctx->x509_method->hs_flush_cached_ca_names(this);
 }
 

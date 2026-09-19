@@ -141,6 +141,10 @@ class X25519KeyShare : public SSLKeyShare {
  public:
   X25519KeyShare() {}
 
+  bool DeriveRealitySecret(uint8_t out[32], const uint8_t peer[32]) override {
+    return X25519(out, private_key_, peer);
+  }
+
   uint16_t GroupID() const override { return SSL_GROUP_X25519; }
 
   bool Generate(CBB *out) override {
@@ -286,6 +290,10 @@ class X25519Kyber768KeyShare : public SSLKeyShare {
 class X25519MLKEM768KeyShare : public SSLKeyShare {
  public:
   X25519MLKEM768KeyShare() {}
+
+  bool DeriveRealitySecret(uint8_t out[32], const uint8_t peer[32]) override {
+    return X25519(out, x25519_private_key_, peer);
+  }
 
   uint16_t GroupID() const override { return SSL_GROUP_X25519_MLKEM768; }
 

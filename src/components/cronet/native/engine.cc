@@ -4,6 +4,7 @@
 
 #include "components/cronet/native/engine.h"
 
+#include <algorithm>
 #include <optional>
 #include <unordered_set>
 #include <utility>
@@ -253,6 +254,11 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
     return CheckResult(Cronet_RESULT_ILLEGAL_STATE_ENGINE_ALREADY_STARTED);
   }
 
+  if (((strict_ech_ || reality_) && params->enable_quic) ||
+      (strict_ech_ && reality_)) {
+    return CheckResult(Cronet_RESULT_ILLEGAL_ARGUMENT);
+  }
+
   URLRequestContextConfigBuilder context_config_builder;
   context_config_builder.enable_quic = params->enable_quic;
   context_config_builder.enable_spdy = params->enable_http2;
@@ -304,6 +310,8 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   context_config_builder.mock_cert_verifier = std::move(mock_cert_verifier_);
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
+  config->strict_ech = strict_ech_;
+  config->reality = reality_;
 
   // Set custom dialer if provided.
   if (dialer_) {
@@ -528,6 +536,31 @@ void Cronet_EngineImpl::SetMockCertVerifierForTesting(
   mock_cert_verifier_ = std::move(mock_cert_verifier);
 }
 
+bool Cronet_EngineImpl::SetStrictECH(bool enabled) {
+  base::AutoLock lock(lock_);
+  if (context_) {
+    return false;
+  }
+  strict_ech_ = enabled;
+  return true;
+}
+
+bool Cronet_EngineImpl::SetReality(const uint8_t* public_key,
+                                 const uint8_t* short_id) {
+  base::AutoLock lock(lock_);
+  if (context_ || !public_key || !short_id) {
+    return false;
+  }
+  net::RealityConfig config;
+  // C callers must supply the fixed sizes documented in cronet_c.h.
+  UNSAFE_BUFFERS({
+    std::copy_n(public_key, config.public_key.size(), config.public_key.begin());
+    std::copy_n(short_id, config.short_id.size(), config.short_id.begin());
+  });
+  reality_ = config;
+  return true;
+}
+
 void Cronet_EngineImpl::SetDialer(
     intptr_t (*dialer)(void*, const char*, uint16_t),
     void* context) {
@@ -577,6 +610,18 @@ stream_engine* Cronet_EngineImpl::GetBidirectionalStreamEngine() {
 
 CRONET_EXPORT Cronet_EnginePtr Cronet_Engine_Create() {
   return new cronet::Cronet_EngineImpl();
+}
+
+CRONET_EXPORT bool Cronet_Engine_SetStrictECH(Cronet_EnginePtr engine,
+                                            bool enabled) {
+  return static_cast<cronet::Cronet_EngineImpl*>(engine)->SetStrictECH(enabled);
+}
+
+CRONET_EXPORT bool Cronet_Engine_SetReality(Cronet_EnginePtr engine,
+                                          const uint8_t* public_key,
+                                          const uint8_t* short_id) {
+  return static_cast<cronet::Cronet_EngineImpl*>(engine)->SetReality(public_key,
+                                                                  short_id);
 }
 
 CRONET_EXPORT void Cronet_Engine_SetMockCertVerifierForTesting(

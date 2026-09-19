@@ -479,6 +479,12 @@ int SSLConnectJob::DoSSLConnect() {
 int SSLConnectJob::DoSSLConnectComplete(int result) {
   connect_timing_.ssl_end = base::TimeTicks::Now();
 
+  if (result == ERR_REALITY_AUTHENTICATION_FAILED) {
+    ssl_client_context()->StartRealityFallback(
+        std::move(ssl_socket_), params_->host_and_port(), connect_timing_);
+    return result;
+  }
+
   if (result != OK && !server_address_.address().empty()) {
     connection_attempts_.emplace_back(server_address_, result);
     server_address_ = IPEndPoint();

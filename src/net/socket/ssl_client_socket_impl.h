@@ -245,6 +245,8 @@ class NET_EXPORT_PRIVATE SSLClientSocketImpl
   // Set when Connect finishes.
   scoped_refptr<X509Certificate> server_cert_;
   CertVerifyResult server_cert_verify_result_;
+  bool reality_enabled_ = false;
+  bool reality_authenticated_ = false;
   bool completed_connect_ = false;
 
   // Set when Read() or Write() successfully reads or writes data to or from the

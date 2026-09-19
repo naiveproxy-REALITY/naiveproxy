@@ -229,6 +229,14 @@ SSLConfigService::SSLConfigService()
 
 SSLConfigService::~SSLConfigService() = default;
 
+const RealityConfig* SSLConfigService::GetRealityConfig() const {
+  return nullptr;
+}
+
+EchMode SSLConfigService::GetEchMode(std::string_view hostname) const {
+  return EchMode::kOpportunistic;
+}
+
 void SSLConfigService::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
 }

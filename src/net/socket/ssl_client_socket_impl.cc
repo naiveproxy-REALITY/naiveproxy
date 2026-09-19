@@ -56,6 +56,7 @@
 #include "net/net_buildflags.h"
 #include "net/ssl/cert_compression.h"
 #include "net/ssl/openssl_ssl_util.h"
+#include "net/ssl/reality_config.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
@@ -704,6 +705,18 @@ int SSLClientSocketImpl::Init() {
     return ERR_UNEXPECTED;
   }
 
+  if (context_->ssl_config_service()) {
+    const auto* reality = context_->ssl_config_service()->GetRealityConfig();
+    if (reality) {
+      if (!ssl_config_.ech_config_list.empty() ||
+          !SSL_set1_reality_config(ssl_.get(), reality->public_key.data(),
+                                  reality->short_id.data())) {
+        return ERR_INVALID_ARGUMENT;
+      }
+      reality_enabled_ = true;
+    }
+  }
+
   if (IsCachingEnabled()) {
     initial_session_cache_generation_number_ =
         context_->ssl_client_session_cache()->generation_number();
@@ -740,6 +753,18 @@ int SSLClientSocketImpl::Init() {
       ssl_config_.version_min_override.value_or(context_->config().version_min);
   uint16_t version_max =
       ssl_config_.version_max_override.value_or(context_->config().version_max);
+  // ECH and REALITY are TLS 1.3-only protocols. The normal Chromium default
+  // still permits TLS 1.2, so apply the protocol requirement at the socket
+  // where the ECH/REALITY state is known. This also covers the camouflage
+  // connection after REALITY authentication fails: it must not silently
+  // downgrade to an ordinary TLS 1.2 site.
+  if (reality_enabled_ || !ssl_config_.ech_config_list.empty()) {
+    constexpr uint16_t kTLS13Version = TLS1_3_VERSION;
+    version_min = std::max(version_min, kTLS13Version);
+    if (version_max < kTLS13Version) {
+      return ERR_SSL_VERSION_OR_CIPHER_MISMATCH;
+    }
+  }
   if (version_min < TLS1_2_VERSION || version_max < TLS1_2_VERSION) {
     // TLS versions before TLS 1.2 are no longer supported.
     return ERR_UNEXPECTED;
@@ -750,14 +775,20 @@ int SSLClientSocketImpl::Init() {
     return ERR_UNEXPECTED;
   }
 
-  SSL_set_early_data_enabled(ssl_.get(), ssl_config_.early_data_enabled);
+  SSL_set_early_data_enabled(ssl_.get(),
+                            ssl_config_.early_data_enabled && !reality_enabled_);
 
   // TODO(crbug.com/41393419): Make this option not a no-op in BoringSSL and
   // then disable it.
   SSL_set_options(ssl_.get(), SSL_OP_LEGACY_SERVER_CONNECT);
 
   SSL_set_mode(ssl_.get(),
-               SSL_MODE_CBC_RECORD_SPLITTING | SSL_MODE_ENABLE_FALSE_START);
+                SSL_MODE_CBC_RECORD_SPLITTING | SSL_MODE_ENABLE_FALSE_START);
+  if (reality_enabled_) {
+    // A camouflage request must wait for the peer's Finished, including when
+    // the ordinary site negotiates TLS 1.2.
+    SSL_clear_mode(ssl_.get(), SSL_MODE_ENABLE_FALSE_START);
+  }
 
   // Use BoringSSL defaults, but disable 3DES and HMAC-SHA1 ciphers in ECDSA.
   // These are the remaining CBC-mode ECDSA ciphers.
@@ -859,11 +890,21 @@ int SSLClientSocketImpl::Init() {
         host_and_port_, &client_cert_, &client_private_key_);
   }
 
-  if (context_->config().ech_enabled) {
+  const EchMode ech_mode =
+      context_->ssl_config_service()
+          ? context_->ssl_config_service()->GetEchMode(host_and_port_.host())
+          : EchMode::kOpportunistic;
+  if (ech_mode == EchMode::kStrict) {
+    if (!context_->config().ech_enabled || ssl_config_.ech_config_list.empty()) {
+      return ERR_STRICT_ECH_REQUIRED;
+    }
+    SSL_set_reject_unusable_ech_config(ssl_.get(), 1);
+  }
+  if (context_->config().ech_enabled && ech_mode != EchMode::kDisabled) {
     // TODO(crbug.com/41482204): Enable this unconditionally.
     SSL_set_enable_ech_grease(ssl_.get(), 1);
   }
-  if (!ssl_config_.ech_config_list.empty()) {
+  if (ech_mode != EchMode::kDisabled && !ssl_config_.ech_config_list.empty()) {
     DCHECK(context_->config().ech_enabled);
     net_log_.AddEvent(NetLogEventType::SSL_ECH_CONFIG_LIST, [&] {
       return base::DictValue().Set(
@@ -991,6 +1032,13 @@ int SSLClientSocketImpl::DoHandshakeComplete(int result) {
   if (alpn_len > 0) {
     std::string_view proto(reinterpret_cast<const char*>(alpn_proto), alpn_len);
     negotiated_protocol_ = NextProtoFromString(proto);
+  } else if (reality_authenticated_ &&
+             std::ranges::contains(ssl_config_.alpn_protos,
+                                   NextProto::kProtoHTTP2)) {
+    // sing-box's REALITY server omits ALPN. This engine targets a configured
+    // HTTP/2 endpoint, so use h2 with prior knowledge after authentication.
+    // An explicit server ALPN selection always takes precedence.
+    negotiated_protocol_ = NextProto::kProtoHTTP2;
   }
 
   RecordNegotiatedProtocol();
@@ -1065,6 +1113,11 @@ int SSLClientSocketImpl::DoHandshakeComplete(int result) {
       FROM_HERE,
       base::BindOnce(&SSLClientSocketImpl::DoPeek, weak_factory_.GetWeakPtr()));
 
+  if (reality_enabled_ && !reality_authenticated_) {
+    // The caller must hand this socket to the independent camouflage request,
+    // never to the original HTTP transaction or its connection pool.
+    return ERR_REALITY_AUTHENTICATION_FAILED;
+  }
   return OK;
 }
 
@@ -1109,6 +1162,18 @@ ssl_verify_result_t SSLClientSocketImpl::VerifyCert() {
                                  NetLogX509CertificateList(server_cert_.get()));
   });
 
+  if (reality_enabled_ && SSL_verify_reality_peer_certificate(ssl_.get())) {
+    // REALITY binds the Ed25519 certificate key to this handshake's auth key.
+    reality_authenticated_ = true;
+    server_cert_verify_result_.Reset();
+    server_cert_verify_result_.verified_cert = server_cert_;
+    return ssl_verify_ok;
+  }
+
+  // A REALITY fallback must pass ordinary hostname and certificate validation.
+  // This only permits finishing TLS for camouflage; DoHandshakeComplete still
+  // fails the original connection attempt after CertificateVerify and Finished.
+
   auto server_trust_anchor_ids = GetServerTrustAnchorIDs();
   if (!server_trust_anchor_ids.empty()) {
     net_log_.AddEvent(
@@ -1122,7 +1187,8 @@ ssl_verify_result_t SSLClientSocketImpl::VerifyCert() {
   // If the certificate is bad and has been previously accepted, use
   // the previous status and bypass the error.
   CertStatus cert_status;
-  if (IsAllowedBadCert(server_cert_.get(), &cert_status)) {
+  if (!reality_enabled_ &&
+      IsAllowedBadCert(server_cert_.get(), &cert_status)) {
     server_cert_verify_result_.Reset();
     server_cert_verify_result_.cert_status = cert_status;
     server_cert_verify_result_.verified_cert = server_cert_;
@@ -1258,7 +1324,7 @@ ssl_verify_result_t SSLClientSocketImpl::HandleVerifyResult() {
       // and map all bypassable errors to fatal ones.
       result = ERR_ECH_FALLBACK_CERTIFICATE_INVALID;
     }
-    if (ssl_config_.ignore_certificate_errors) {
+    if (ssl_config_.ignore_certificate_errors && !reality_enabled_) {
       result = OK;
     }
   }
@@ -1672,7 +1738,7 @@ bool SSLClientSocketImpl::IsRenegotiationAllowed() const {
 }
 
 bool SSLClientSocketImpl::IsCachingEnabled() const {
-  return context_->ssl_client_session_cache() != nullptr;
+  return !reality_enabled_ && context_->ssl_client_session_cache() != nullptr;
 }
 
 ssl_private_key_result_t SSLClientSocketImpl::PrivateKeySignCallback(

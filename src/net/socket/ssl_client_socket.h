@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/containers/flat_set.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "net/base/load_timing_info.h"
@@ -187,6 +188,17 @@ class NET_EXPORT SSLClientContext : public SSLConfigService::Observer,
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config);
 
+  // Only invoked for ERR_REALITY_AUTHENTICATION_FAILED, after ordinary TLS
+  // verification and the complete handshake. The HTTP session owns the detached
+  // camouflage request and cancels it on shutdown.
+  using RealityFallbackCallback = base::RepeatingCallback<void(
+      std::unique_ptr<SSLClientSocket>, const HostPortPair&,
+      const LoadTimingInfo::ConnectTiming&)>;
+  void SetRealityFallbackCallback(RealityFallbackCallback callback);
+  void StartRealityFallback(std::unique_ptr<SSLClientSocket> socket,
+                            const HostPortPair& host_and_port,
+                            const LoadTimingInfo::ConnectTiming& connect_timing);
+
   // Looks up the client certificate preference for |server|. If one is found,
   // returns true and sets |client_cert| and |private_key| to the certificate
   // and key. Note these may be null if the preference is to continue with no
@@ -271,6 +283,8 @@ class NET_EXPORT SSLClientContext : public SSLConfigService::Observer,
   raw_ptr<SCTAuditingDelegate> sct_auditing_delegate_;
 
   SSLClientAuthCache ssl_client_auth_cache_;
+
+  RealityFallbackCallback reality_fallback_callback_;
 
   base::ObserverList<Observer, true /* check_empty */> observers_;
 };

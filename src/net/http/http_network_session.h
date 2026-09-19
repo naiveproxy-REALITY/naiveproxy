@@ -58,6 +58,7 @@ class ProxyDelegate;
 class ProxyResolutionService;
 class ProxyChain;
 class QuicCryptoClientStreamFactory;
+class RealityFallback;
 #if BUILDFLAG(ENABLE_REPORTING)
 class ReportingService;
 #endif
@@ -317,6 +318,12 @@ class NET_EXPORT HttpNetworkSession : public base::PowerSuspendObserver {
  private:
   friend class HttpNetworkSessionPeer;
 
+  void StartRealityFallback(
+      std::unique_ptr<SSLClientSocket> socket,
+      const HostPortPair& host_and_port,
+      const LoadTimingInfo::ConnectTiming& connect_timing);
+  void RemoveRealityFallback(RealityFallback* fallback);
+
   ClientSocketPoolManager* GetSocketPoolManager(SocketPoolType pool_type);
 
   const raw_ptr<NetLog> net_log_;
@@ -356,6 +363,9 @@ class NET_EXPORT HttpNetworkSession : public base::PowerSuspendObserver {
 
   HttpNetworkSessionParams params_;
   HttpNetworkSessionContext context_;
+
+  std::set<std::unique_ptr<RealityFallback>, base::UniquePtrComparator>
+      reality_fallbacks_;
 
   bool power_suspended_ = false;
 

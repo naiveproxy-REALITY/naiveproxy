@@ -4548,6 +4548,22 @@ OPENSSL_EXPORT const char *SSL_early_data_reason_string(
 // ECH extension when no supported ECHConfig is available.
 OPENSSL_EXPORT void SSL_set_enable_ech_grease(SSL *ssl, int enable);
 
+// SSL_set_reject_unusable_ech_config configures whether the client will fail
+// the handshake if a valid, supported ECHConfig cannot be selected to offer ECH.
+OPENSSL_EXPORT void SSL_set_reject_unusable_ech_config(SSL *ssl, int enable);
+
+// Configures a TCP REALITY client before its handshake. The public key is 32
+// bytes and short ID is eight bytes. ECH and session resumption are unsupported.
+OPENSSL_EXPORT int SSL_set1_reality_config(SSL *ssl,
+                                         const uint8_t public_key[32],
+                                         const uint8_t short_id[8]);
+
+// Authenticates the peer certificate using the current REALITY auth key. Call
+// only from the client's custom certificate verifier. On success, allows the
+// authenticated Ed25519 CertificateVerify without altering the ClientHello.
+// CertificateVerify and Finished still undergo normal cryptographic validation.
+OPENSSL_EXPORT int SSL_verify_reality_peer_certificate(SSL *ssl);
+
 // SSL_set1_ech_config_list configures `ssl` to, as a client, offer ECH with the
 // specified configuration. `ech_config_list` should contain a serialized
 // ECHConfigList structure. It returns one on success and zero on error.
@@ -7060,6 +7076,7 @@ BSSL_NAMESPACE_END
 #define SSL_R_UNSUPPORTED_CERTIFICATE 334
 #define SSL_R_MISSING_KEY 335
 #define SSL_R_INVALID_RAW_PUBLIC_KEY 336
+#define SSL_R_UNUSABLE_ECH_CONFIG_LIST 337
 #define SSL_R_SSLV3_ALERT_CLOSE_NOTIFY 1000
 #define SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE 1010
 #define SSL_R_SSLV3_ALERT_BAD_RECORD_MAC 1020

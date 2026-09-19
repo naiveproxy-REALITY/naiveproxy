@@ -21,6 +21,7 @@
 #include "net/base/network_handle.h"
 #include "net/cert/cert_verifier.h"
 #include "net/nqe/effective_connection_type.h"
+#include "net/ssl/reality_config.h"
 #include "url/origin.h"
 
 namespace net {
@@ -182,6 +183,10 @@ struct URLRequestContextConfig {
   base::TimeDelta heartbeat_interval;
 
   const std::optional<cronet::proto::ProxyOptions> proxy_options;
+
+  // Fixed before engine startup; applies to all connections and retries.
+  bool strict_ech = false;
+  std::optional<net::RealityConfig> reality;
 
   // Custom TCP dialer callback. When set, this callback will be used to
   // establish TCP connections instead of the default socket API.

@@ -482,6 +482,10 @@ NET_ERROR(PROXY_UNABLE_TO_CONNECT_TO_DESTINATION, -186)
 NET_ERROR(PROXY_DELEGATE_CANCELED_CONNECT_REQUEST, -187)
 NET_ERROR(PROXY_DELEGATE_CANCELED_CONNECT_RESPONSE, -188)
 
+// TLS authenticated the camouflage site, but REALITY authentication failed.
+// The connected socket is reserved for an independent camouflage request.
+NET_ERROR(REALITY_AUTHENTICATION_FAILED, -189)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.

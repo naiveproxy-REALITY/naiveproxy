@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/containers/flat_map.h"
@@ -17,6 +18,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/thread_annotations.h"
 #include "components/cronet/native/generated/cronet.idl_impl_interface.h"
+#include "net/ssl/reality_config.h"
 
 extern "C" typedef struct stream_engine stream_engine;
 
@@ -55,6 +57,10 @@ class Cronet_EngineImpl : public Cronet_Engine {
   // Check |result| and aborts if result is not SUCCESS and enableCheckResult
   // is true.
   Cronet_RESULT CheckResult(Cronet_RESULT result);
+
+  bool SetStrictECH(bool enabled) LOCKS_EXCLUDED(lock_);
+  bool SetReality(const uint8_t* public_key, const uint8_t* short_id)
+      LOCKS_EXCLUDED(lock_);
 
   // Set Mock CertVerifier for testing. Must be called before StartWithParams.
   void SetMockCertVerifierForTesting(
@@ -105,6 +111,8 @@ class Cronet_EngineImpl : public Cronet_Engine {
 
   // Synchronize access to member variables from different threads.
   base::Lock lock_;
+  bool strict_ech_ GUARDED_BY(lock_) = false;
+  std::optional<net::RealityConfig> reality_ GUARDED_BY(lock_);
   // Cronet URLRequest context used for all network operations.
   std::unique_ptr<CronetContext> context_;
   // Signaled when |context_| initialization is done.

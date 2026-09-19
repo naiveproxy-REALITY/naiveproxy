@@ -43,6 +43,7 @@
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/socket/custom_client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_config_service_defaults.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
@@ -1073,6 +1074,15 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
 
   SetContextBuilderExperimentalOptions(context_builder, &session_params,
                                        quic_context->params(), bound_network);
+
+  if (strict_ech || reality) {
+    // Apply after experimental options so QUIC cannot bypass TCP authentication.
+    session_params.enable_quic = false;
+    context_builder->set_ssl_config_service(
+        std::make_unique<net::SSLConfigServiceDefaults>(
+            strict_ech ? net::EchMode::kStrict : net::EchMode::kOpportunistic,
+            reality));
+  }
 
   context_builder->set_http_network_session_params(session_params);
   context_builder->set_quic_context(std::move(quic_context));

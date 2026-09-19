@@ -29,9 +29,11 @@
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/mem.h>
 #include <openssl/nid.h>
 #include <openssl/rand.h>
+#include <openssl/x509.h>
 
 #include "../crypto/bytestring/internal.h"
 #include "../crypto/internal.h"
@@ -455,6 +457,56 @@ SSL_CTX *SSL_CTX_new(const SSL_METHOD *method) {
   return ret.release();
 }
 
+int SSL_set1_reality_config(SSL *ssl, const uint8_t public_key[32],
+                            const uint8_t short_id[8]) {
+  if (!ssl->config || ssl->server || !public_key || !short_id ||
+      SSL_is_dtls(ssl) || SSL_is_quic(ssl) ||
+      (ssl->s3->hs && ssl->s3->hs->state != 0)) {
+    return 0;
+  }
+  if (!ssl->config->reality_config.Init(40)) {
+    return 0;
+  }
+  OPENSSL_memcpy(ssl->config->reality_config.data(), public_key, 32);
+  OPENSSL_memcpy(ssl->config->reality_config.data() + 32, short_id, 8);
+  return 1;
+}
+
+int SSL_verify_reality_peer_certificate(SSL *ssl) {
+  SSL_HANDSHAKE *hs = ssl->s3->hs.get();
+  if (ssl->server || !hs || hs->reality_auth_key.size() != 32 ||
+      ssl_protocol_version(ssl) != TLS1_3_VERSION || SSL_session_reused(ssl)) {
+    return 0;
+  }
+  const STACK_OF(CRYPTO_BUFFER) *certs = SSL_get0_peer_certificates(ssl);
+  if (!certs || sk_CRYPTO_BUFFER_num(certs) == 0) {
+    return 0;
+  }
+  const CRYPTO_BUFFER *leaf = sk_CRYPTO_BUFFER_value(certs, 0);
+  const uint8_t *ptr = CRYPTO_BUFFER_data(leaf);
+  UniquePtr<X509> cert(d2i_X509(nullptr, &ptr, CRYPTO_BUFFER_len(leaf)));
+  if (!cert || ptr != CRYPTO_BUFFER_data(leaf) + CRYPTO_BUFFER_len(leaf)) {
+    return 0;
+  }
+  EVP_PKEY *key = X509_get0_pubkey(cert.get());
+  uint8_t public_key[32], expected[EVP_MAX_MD_SIZE];
+  size_t public_key_len = sizeof(public_key);
+  unsigned expected_len;
+  const ASN1_BIT_STRING *signature;
+  X509_get0_signature(&signature, nullptr, cert.get());
+  if (!key || EVP_PKEY_id(key) != EVP_PKEY_ED25519 ||
+      !EVP_PKEY_get_raw_public_key(key, public_key, &public_key_len) ||
+      public_key_len != 32 || ASN1_STRING_length(signature) != 64 ||
+      !HMAC(EVP_sha512(), hs->reality_auth_key.data(), 32, public_key, 32,
+            expected, &expected_len) || expected_len != 64 ||
+      CRYPTO_memcmp(expected, ASN1_STRING_get0_data(signature), 64) != 0) {
+    return 0;
+  }
+  // Restrict the subsequent signature to the authenticated Ed25519 key.
+  const uint16_t algorithm = SSL_SIGN_ED25519;
+  return SSL_set_verify_algorithm_prefs(ssl, &algorithm, 1);
+}
+
 int SSL_CTX_up_ref(SSL_CTX *ctx) {
   FromOpaque(ctx)->UpRefInternal();
   return 1;
@@ -578,6 +630,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
 SSL_CONFIG::SSL_CONFIG(SSL *ssl_arg)
     : ssl(ssl_arg),
       ech_grease_enabled(false),
+      reject_unusable_ech_config(false),
       signed_cert_timestamps_enabled(false),
       ocsp_stapling_enabled(false),
       channel_id_enabled(false),

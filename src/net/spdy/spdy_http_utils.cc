@@ -216,6 +216,13 @@ void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
       (*headers)[spdy::kHttp2AuthorityHeader] = it.value();
       continue;
     }
+    // Cronet embedders can supply a virtual host independently of the URL
+    // hostname used for TLS. Preserve the HTTP/1 Host override in HTTP/2 and
+    // HTTP/3 as :authority, while connection setup keeps using info.url.
+    if (info.method != "CONNECT" && name == "host") {
+      (*headers)[spdy::kHttp2AuthorityHeader] = it.value();
+      continue;
+    }
     if (name.empty() || name[0] == ':' || name == "connection" ||
         name == "proxy-connection" || name == "transfer-encoding" ||
         name == "host") {

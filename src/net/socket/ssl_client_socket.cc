@@ -253,6 +253,21 @@ std::unique_ptr<SSLClientSocket> SSLClientContext::CreateSSLClientSocket(
                                                host_and_port, ssl_config);
 }
 
+void SSLClientContext::SetRealityFallbackCallback(
+    RealityFallbackCallback callback) {
+  reality_fallback_callback_ = std::move(callback);
+}
+
+void SSLClientContext::StartRealityFallback(
+    std::unique_ptr<SSLClientSocket> socket,
+    const HostPortPair& host_and_port,
+    const LoadTimingInfo::ConnectTiming& connect_timing) {
+  if (reality_fallback_callback_) {
+    reality_fallback_callback_.Run(std::move(socket), host_and_port,
+                                   connect_timing);
+  }
+}
+
 bool SSLClientContext::GetClientCertificate(
     const HostPortPair& server,
     scoped_refptr<X509Certificate>* client_cert,

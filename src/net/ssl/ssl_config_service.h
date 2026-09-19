@@ -10,12 +10,15 @@
 #include <vector>
 
 #include "base/observer_list.h"
+#include "net/base/ech_mode.h"
 #include "net/base/net_export.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_config.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 namespace net {
+
+struct RealityConfig;
 
 // Represents a given named group in TLS, used in supported_groups and
 // key_share.
@@ -143,6 +146,12 @@ class NET_EXPORT SSLConfigService {
 
   // May not be thread-safe, should only be called on the IO thread.
   virtual SSLContextConfig GetSSLContextConfig() = 0;
+
+  // Cronet fixes this policy for the lifetime of an engine. Existing services
+  // retain opportunistic ECH; ech_enabled still controls the legacy off switch.
+  virtual EchMode GetEchMode(std::string_view hostname) const;
+
+  virtual const RealityConfig* GetRealityConfig() const;
 
   // Returns true if connections to |hostname| can reuse, or are permitted to
   // reuse, connections on which a client cert has been negotiated. Note that

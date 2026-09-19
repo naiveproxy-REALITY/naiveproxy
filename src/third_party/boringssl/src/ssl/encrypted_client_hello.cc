@@ -656,6 +656,10 @@ bool ssl_select_ech_config(SSL_HANDSHAKE *hs, Span<uint8_t> out_enc,
   *out_enc_len = 0;
   if (hs->max_version < TLS1_3_VERSION) {
     // ECH requires TLS 1.3.
+    if (hs->config->reject_unusable_ech_config) {
+      OPENSSL_PUT_ERROR(SSL, SSL_R_UNUSABLE_ECH_CONFIG_LIST);
+      return false;
+    }
     return true;
   }
 
@@ -706,6 +710,11 @@ bool ssl_select_ech_config(SSL_HANDSHAKE *hs, Span<uint8_t> out_enc,
         return hs->selected_ech_config != nullptr;
       }
     }
+  }
+
+  if (hs->config->reject_unusable_ech_config && !hs->selected_ech_config) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_UNUSABLE_ECH_CONFIG_LIST);
+    return false;
   }
 
   return true;
@@ -898,6 +907,13 @@ void SSL_set_enable_ech_grease(SSL *ssl, int enable) {
     return;
   }
   ssl->config->ech_grease_enabled = !!enable;
+}
+
+void SSL_set_reject_unusable_ech_config(SSL *ssl, int enable) {
+  if (!ssl->config) {
+    return;
+  }
+  ssl->config->reject_unusable_ech_config = !!enable;
 }
 
 int SSL_set1_ech_config_list(SSL *ssl, const uint8_t *ech_config_list,

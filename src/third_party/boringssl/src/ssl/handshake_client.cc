@@ -30,6 +30,7 @@
 #include <openssl/ecdsa.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/hkdf.h>
 #include <openssl/hpke.h>
 #include <openssl/md5.h>
 #include <openssl/mem.h>
@@ -216,6 +217,78 @@ bool ssl_write_client_hello_without_extensions(const SSL_HANDSHAKE *hs,
   return true;
 }
 
+static bool seal_reality_client_hello(SSL_HANDSHAKE *hs, Span<uint8_t> msg) {
+  SSL *ssl = hs->ssl;
+  // A second ClientHello must not change legacy_session_id. Reject HRR rather
+  // than resealing REALITY authentication with a different transcript or key.
+  if (!hs->reality_auth_key.empty() || hs->selected_ech_config ||
+      hs->session_id.size() != 32 || SSL_is_dtls(ssl) || SSL_is_quic(ssl)) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_UNEXPECTED_MESSAGE);
+    return false;
+  }
+  SSLKeyShare *auth_share = nullptr;
+  for (const auto &share : hs->key_shares) {
+    if (share->GroupID() == SSL_GROUP_X25519) {
+      auth_share = share.get();
+      break;
+    }
+    if (share->GroupID() == SSL_GROUP_X25519_MLKEM768) {
+      auth_share = share.get();
+    }
+  }
+  uint8_t secret[32];
+  if (!auth_share ||
+      !auth_share->DeriveRealitySecret(secret, hs->config->reality_config.data())) {
+    OPENSSL_cleanse(secret, sizeof(secret));
+    OPENSSL_PUT_ERROR(SSL, SSL_R_BAD_ECPOINT);
+    return false;
+  }
+  static const uint8_t kInfo[] = {'R', 'E', 'A', 'L', 'I', 'T', 'Y'};
+  bool derived =
+      hs->reality_auth_key.Init(32) &&
+      HKDF(hs->reality_auth_key.data(), 32, EVP_sha256(), secret, sizeof(secret),
+           ssl->s3->client_random, 20, kInfo, sizeof(kInfo));
+  OPENSSL_cleanse(secret, sizeof(secret));
+  if (!derived) {
+    return false;
+  }
+
+  // The final message, including its handshake header and a zero Session ID,
+  // is the AEAD additional data. All extensions have already been serialized.
+  CBS body, session_id;
+  CBS_init(&body, msg.data(), msg.size());
+  if (!CBS_skip(&body, 4 + 2 + SSL3_RANDOM_SIZE) ||
+      !CBS_get_u8_length_prefixed(&body, &session_id) || CBS_len(&session_id) != 32) {
+    OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+    return false;
+  }
+  size_t offset = CBS_data(&session_id) - msg.data();
+  OPENSSL_memset(msg.data() + offset, 0, 32);
+  uint8_t plaintext[16] = {1, 8, 1, 0};
+  // Match sing-box's hardcoded ClientVer 1.8.1; the fourth byte is reserved.
+  uint32_t now =
+      static_cast<uint32_t>(ssl_ctx_get_current_time(ssl->ctx.get()).tv_sec);
+  plaintext[4] = now >> 24;
+  plaintext[5] = now >> 16;
+  plaintext[6] = now >> 8;
+  plaintext[7] = now;
+  OPENSSL_memcpy(plaintext + 8, hs->config->reality_config.data() + 32, 8);
+  ScopedEVP_AEAD_CTX aead;
+  uint8_t sealed[32];
+  size_t sealed_len;
+  if (!EVP_AEAD_CTX_init(aead.get(), EVP_aead_aes_256_gcm(),
+                         hs->reality_auth_key.data(), 32, 16, nullptr) ||
+      !EVP_AEAD_CTX_seal(aead.get(), sealed, &sealed_len, sizeof(sealed),
+                         ssl->s3->client_random + 20, 12, plaintext,
+                         sizeof(plaintext), msg.data(), msg.size()) ||
+      sealed_len != 32) {
+    return false;
+  }
+  OPENSSL_memcpy(msg.data() + offset, sealed, 32);
+  OPENSSL_memcpy(hs->session_id.data(), sealed, 32);
+  return true;
+}
+
 bool ssl_add_client_hello(SSL_HANDSHAKE *hs) {
   SSL *const ssl = hs->ssl;
   ScopedCBB cbb;
@@ -232,6 +305,10 @@ bool ssl_add_client_hello(SSL_HANDSHAKE *hs) {
     return false;
   }
 
+  if (!hs->config->reality_config.empty() &&
+      !seal_reality_client_hello(hs, Span(msg.data(), msg.size()))) {
+    return false;
+  }
   return ssl->method->add_message(ssl, std::move(msg));
 }
 
@@ -354,6 +431,11 @@ static enum ssl_hs_wait_t do_start_connect(SSL_HANDSHAKE *hs) {
   SSL *const ssl = hs->ssl;
 
   ssl_do_info_callback(ssl, SSL_CB_HANDSHAKE_START, 1);
+  if (!hs->config->reality_config.empty()) {
+    // REALITY authenticates each new connection with a fresh certificate.
+    ssl_set_session(ssl, nullptr);
+    ssl->enable_early_data = false;
+  }
   // |session_reused| must be reset in case this is a renegotiation.
   ssl->s3->session_reused = false;
 
