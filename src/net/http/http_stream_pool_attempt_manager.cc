@@ -799,6 +799,21 @@ void HttpStreamPool::AttemptManager::OnTcpBasedAttemptComplete(
 
   const auto reuse_type = StreamSocketHandle::SocketReuseType::kUnused;
   if (stream_socket->GetNegotiatedProtocol() == NextProto::kProtoHTTP2) {
+    // A legacy BidirectionalStream job can finish while this V3 TLS attempt is
+    // pending. Both paths share SpdySessionPool, which cannot register the same
+    // session key twice. Reuse the winner and discard the redundant socket.
+    base::WeakPtr<SpdySession> existing_session =
+        pool()->FindAvailableSpdySession(stream_key(), spdy_session_key(),
+                                        IsIpBasedPoolingEnabledForH2(),
+                                        net_log());
+    if (existing_session) {
+      stream_socket->Disconnect();
+      stream_socket.reset();
+      tcp_based_attempt.reset();
+      HandleSpdySessionReady(
+          existing_session, StreamSocketCloseReason::kUsingExistingSpdySession);
+      return;
+    }
     std::unique_ptr<HttpStreamPoolHandle> handle = group_->CreateHandle(
         std::move(stream_socket), reuse_type, std::move(connect_timing));
     base::WeakPtr<SpdySession> spdy_session;

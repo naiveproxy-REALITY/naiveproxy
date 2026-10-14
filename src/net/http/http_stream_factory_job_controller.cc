@@ -901,7 +901,10 @@ int HttpStreamFactory::JobController::DoCreateJobs() {
   advertised_alt_svc_ =
       GetAdvertisedAltSvcFor(request_info_, delegate_, stream_type_);
 
-  if (session_->host_resolver()->IsHappyEyeballsV3Enabled() &&
+  // HttpStreamPool does not implement BidirectionalStream. Keep those requests
+  // on the legacy job path even when Happy Eyeballs V3 is enabled.
+  if (stream_type_ == HttpStreamRequest::HTTP_STREAM &&
+      session_->host_resolver()->IsHappyEyeballsV3Enabled() &&
       proxy_info_.is_direct() && !is_websocket_ &&
       request_info_.socket_tag == SocketTag()) {
     SwitchToHttpStreamPool();
