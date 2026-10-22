@@ -751,41 +751,46 @@ CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
     const char* pem_root_certs) {
   cronet::EnsureInitialized();
 
-  if (!pem_root_certs || strlen(pem_root_certs) == 0) {
-    LOG(ERROR) << "CreateCertVerifierWithRootCerts: PEM data is empty";
+  if (!pem_root_certs) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: PEM data is null";
     return nullptr;
   }
 
-  // Parse PEM certificates
+  // Parse PEM certificates. An explicit empty string intentionally creates an
+  // empty trust store, which rejects every certificate chain.
   size_t pem_len = strlen(pem_root_certs);
-  net::CertificateList certs = net::X509Certificate::CreateCertificateListFromBytes(
-      base::as_byte_span(std::string_view(pem_root_certs, pem_len)),
-      net::X509Certificate::FORMAT_AUTO);
-
-  if (certs.empty()) {
-    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid certificates found in PEM data";
-    return nullptr;
-  }
-
-  // Create a TrustStoreInMemory with the parsed certificates
   auto trust_store = std::make_unique<bssl::TrustStoreInMemory>();
 
-  for (const auto& cert : certs) {
-    bssl::CertErrors errors;
-    auto parsed = bssl::ParsedCertificate::Create(
-        bssl::UpRef(cert->cert_buffer()),
-        net::x509_util::DefaultParseCertificateOptions(), &errors);
-    if (!parsed) {
-      LOG(WARNING) << "CreateCertVerifierWithRootCerts: Failed to parse certificate: "
-                   << errors.ToDebugString();
-      continue;
-    }
-    trust_store->AddTrustAnchor(std::move(parsed));
-  }
+  if (pem_len > 0) {
+    net::CertificateList certs =
+        net::X509Certificate::CreateCertificateListFromBytes(
+            base::as_byte_span(std::string_view(pem_root_certs, pem_len)),
+            net::X509Certificate::FORMAT_AUTO);
 
-  if (trust_store->IsEmpty()) {
-    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid trust anchors could be parsed";
-    return nullptr;
+    if (certs.empty()) {
+      LOG(ERROR) << "CreateCertVerifierWithRootCerts: "
+                    "No valid certificates found in PEM data";
+      return nullptr;
+    }
+
+    for (const auto& cert : certs) {
+      bssl::CertErrors errors;
+      auto parsed = bssl::ParsedCertificate::Create(
+          bssl::UpRef(cert->cert_buffer()),
+          net::x509_util::DefaultParseCertificateOptions(), &errors);
+      if (!parsed) {
+        LOG(WARNING) << "CreateCertVerifierWithRootCerts: Failed to parse certificate: "
+                     << errors.ToDebugString();
+        continue;
+      }
+      trust_store->AddTrustAnchor(std::move(parsed));
+    }
+
+    if (trust_store->IsEmpty()) {
+      LOG(ERROR) << "CreateCertVerifierWithRootCerts: "
+                    "No valid trust anchors could be parsed";
+      return nullptr;
+    }
   }
 
   // Create the SystemTrustStore with only custom roots

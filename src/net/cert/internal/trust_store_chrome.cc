@@ -309,8 +309,10 @@ ChromeRootStoreData::CreateFromRootStoreProto(
 }
 
 ChromeRootStoreData ChromeRootStoreData::CreateFromCompiledRootStore() {
+  base::span<const ChromeMtcAnchorInfo> mtc_anchors =
+      kChromeTrustedMtcAnchorList;
   return ChromeRootStoreData(kChromeRootCertList, kEutlRootCertList,
-                             kChromeTrustedMtcAnchorList,
+                             mtc_anchors,
                              /*certs_are_static=*/true,
                              /*version=*/CompiledChromeRootStoreVersion());
 }
@@ -737,9 +739,11 @@ TrustStoreChrome::GetTrustAnchorIDsFromCompiledInRootStore(
   // constraints and not advertise Trust Anchor IDs for anchors that can't work
   // on the running chrome version.
   std::vector<std::vector<uint8_t>> trust_anchor_ids;
-  for (const auto& anchor :
-       (cert_list_for_testing.empty() ? kChromeRootCertList
-                                      : cert_list_for_testing)) {
+  base::span<const ChromeRootCertInfo> cert_list = kChromeRootCertList;
+  if (!cert_list_for_testing.empty()) {
+    cert_list = cert_list_for_testing;
+  }
+  for (const auto& anchor : cert_list) {
     if (!anchor.trust_anchor_id.empty()) {
       trust_anchor_ids.emplace_back(base::ToVector(anchor.trust_anchor_id));
     }
@@ -755,9 +759,12 @@ TrustStoreChrome::GetTrustedMtcLogIDsFromCompiledInRootStore(
   // constraints and not include log IDs for anchors that can't work
   // on the running chrome version.
   std::vector<std::vector<uint8_t>> log_ids;
-  for (const auto& anchor :
-       (anchor_list_for_testing.empty() ? kChromeTrustedMtcAnchorList
-                                        : anchor_list_for_testing)) {
+  base::span<const ChromeMtcAnchorInfo> anchor_list =
+      kChromeTrustedMtcAnchorList;
+  if (!anchor_list_for_testing.empty()) {
+    anchor_list = anchor_list_for_testing;
+  }
+  for (const auto& anchor : anchor_list) {
     log_ids.emplace_back(base::ToVector(anchor.log_id));
   }
   return log_ids;

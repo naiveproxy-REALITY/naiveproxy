@@ -41,7 +41,7 @@
 #include "third_party/boringssl/src/include/openssl/pool.h"
 #elif BUILDFLAG(IS_WIN)
 #include "net/cert/internal/trust_store_win.h"
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
+#elif BUILDFLAG(IS_LINUX)
 #include "base/lazy_instance.h"
 #endif
 
@@ -337,7 +337,7 @@ std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStore() {
   return std::make_unique<SystemTrustStoreFuchsia>();
 }
 
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
+#elif BUILDFLAG(IS_LINUX)
 
 namespace {
 
@@ -354,18 +354,11 @@ constexpr std::array<const char*, 6> kStaticRootCertFiles = {
 
 // Possible directories with certificate files; stop after successfully
 // reading at least one file from a directory.
-#if BUILDFLAG(IS_ANDROID)
-constexpr std::array<const char*, 2> kStaticRootCertDirs = {
-    "/apex/com.android.conscrypt/cacerts",  // Android 14 and later.
-    "/system/etc/security/cacerts",        // Earlier Android releases.
-};
-#else
 constexpr std::array<const char*, 3> kStaticRootCertDirs = {
     "/etc/ssl/certs",      // SLES10/SLES11, https://golang.org/issue/12139
     "/etc/pki/tls/certs",  // Fedora/RHEL
     "/system/etc/security/cacerts",  // Android
 };
-#endif
 
 // The environment variable which identifies where to locate the SSL
 // certificate file. If set this overrides the system default.
@@ -518,41 +511,17 @@ void InitializeTrustStoreWinSystem() {
 
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
 
-namespace {
-TrustStoreAndroid* GetGlobalTrustStoreAndroidForCRS() {
-  static base::NoDestructor<TrustStoreAndroid> static_trust_store_android;
-  return static_trust_store_android.get();
-}
-
-void InitializeTrustStoreForCRSOnWorkerThread() {
-  GetGlobalTrustStoreAndroidForCRS()->Initialize();
-}
-}  // namespace
-
 std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStoreChromeRoot(
     std::unique_ptr<TrustStoreChrome> chrome_root) {
-  return std::make_unique<SystemTrustStoreChromeWithUnOwnedSystemStore>(
-      std::move(chrome_root), GetGlobalTrustStoreAndroidForCRS());
+  // Android's static CA directories cannot represent its per-user removed-root
+  // policy. Do not add them as a secondary trust source behind the Chrome Root
+  // Store, or a root disabled by the user could become trusted again.
+  return CreateChromeOnlySystemTrustStore(std::move(chrome_root));
 }
 
 void InitializeTrustStoreAndroid() {
-  // Start observing DB change before the Trust Store is initialized so we don't
-  // accidentally miss any changes. See https://crrev.com/c/4226436 for context.
-  //
-  // This call is safe here because we're the only callers of
-  // ObserveCertDBChanges on the singleton TrustStoreAndroid.
-  GetGlobalTrustStoreAndroidForCRS()->ObserveCertDBChanges();
-
-  static bool initialized = false;
-  if (initialized) {
-    return;
-  }
-
-  initialized = true;
-  base::ThreadPool::PostTask(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(&InitializeTrustStoreForCRSOnWorkerThread));
+  // The standalone Cronet build intentionally does not attach the Android
+  // platform trust store. See CreateSslSystemTrustStoreChromeRoot().
 }
 
 #else
