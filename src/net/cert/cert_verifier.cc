@@ -129,6 +129,10 @@ bool CertVerifier::RequestParams::operator<(
   return key_ < other.key_;
 }
 
+std::vector<std::vector<uint8_t>> CertVerifier::GetTrustAnchorIDs() const {
+  return {};
+}
+
 // static
 std::unique_ptr<CertVerifierWithUpdatableProc>
 CertVerifier::CreateDefaultWithoutCaching(

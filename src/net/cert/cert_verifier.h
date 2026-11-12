@@ -221,9 +221,7 @@ class NET_EXPORT CertVerifier {
   // Returns classic TLS Trust Anchor IDs associated with explicitly configured
   // roots, if known. Standalone Cronet uses these when replacing its default
   // verifier; an arbitrary verifier must not advertise the Chrome root set.
-  virtual std::vector<std::vector<uint8_t>> GetTrustAnchorIDs() const {
-    return {};
-  }
+  virtual std::vector<std::vector<uint8_t>> GetTrustAnchorIDs() const;
 
   // Creates a CertVerifier implementation that verifies certificates using
   // the preferred underlying cryptographic libraries.  |cert_net_fetcher| may

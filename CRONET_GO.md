@@ -20,6 +20,8 @@ Integration changes for this release:
   the matching subset when an explicit PEM root store is selected.
 - Restore the two Chromium i18n generators required by the updated prefs types,
   using their ICU-independent targets for standalone Cronet.
+- Keep URLRequest independent of the Android Java PCC audit logger: the
+  standalone C API is initialized without a JVM or generated Java bindings.
 - Download Chromium 154's separate Android compiler-rt package even when the
   desktop compiler was already cached.
 
