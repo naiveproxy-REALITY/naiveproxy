@@ -29,6 +29,7 @@
 #include "net/log/net_log_source.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/next_proto.h"
+#include "net/socket/read_multiple_emulator.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/tcp_socket.h"
@@ -58,9 +59,11 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
  public:
   ConnectedDatagramClientSocket(
       CustomClientSocketFactory::UdpDialerCallback dialer,
+      handles::NetworkHandle target_network,
       net::NetLog* net_log,
       const NetLogSource& source)
       : dialer_(std::move(dialer)),
+        target_network_(target_network),
         net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)),
         read_length_buffer_(base::MakeRefCounted<IOBufferWithSize>(2)),
         write_length_buffer_(base::MakeRefCounted<IOBufferWithSize>(2)) {
@@ -145,6 +148,16 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
 #endif
   }
 
+  base::expected<DatagramsMetadata, Error> ReadMultiple(
+      IOBuffer* buf,
+      size_t buf_len,
+      size_t max_message_size,
+      base::OnceCallback<void(base::expected<DatagramsMetadata, Error>)>
+          callback) override {
+    return read_multiple_emulator_.ReadMultiple(
+        buf, buf_len, max_message_size, std::move(callback));
+  }
+
   void Close() override {
     connected_ = false;
     socket_.reset();
@@ -206,6 +219,9 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   int DoConnect(const IPEndPoint& address) {
     if (connected_) {
       return OK;
+    }
+    if (target_network_ != handles::kInvalidNetworkHandle) {
+      return ERR_NOT_IMPLEMENTED;
     }
 
     const std::string address_string = address.ToStringWithoutPort();
@@ -498,6 +514,7 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   }
 
   CustomClientSocketFactory::UdpDialerCallback dialer_;
+  const handles::NetworkHandle target_network_;
   base::OnceClosure on_close_;
   NetLogWithSource net_log_;
 
@@ -529,6 +546,7 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   int write_user_buffer_len_ = 0;
   scoped_refptr<DrainableIOBuffer> write_buffer_;
   MutableNetworkTrafficAnnotationTag write_traffic_annotation_;
+  ReadMultipleEmulator read_multiple_emulator_{this};
 };
 
 // A TransportClientSocket that immediately fails with a predetermined error.
@@ -599,19 +617,21 @@ CustomClientSocketFactory::~CustomClientSocketFactory() = default;
 std::unique_ptr<DatagramClientSocket>
 CustomClientSocketFactory::CreateDatagramClientSocket(
     DatagramSocket::BindType bind_type,
+    handles::NetworkHandle target_network,
     NetLog* net_log,
     const NetLogSource& source) {
   if (udp_dialer_) {
-    return std::make_unique<ConnectedDatagramClientSocket>(udp_dialer_, net_log,
-                                                           source);
+    return std::make_unique<ConnectedDatagramClientSocket>(
+        udp_dialer_, target_network, net_log, source);
   }
   return ClientSocketFactory::GetDefaultFactory()->CreateDatagramClientSocket(
-      bind_type, net_log, source);
+      bind_type, target_network, net_log, source);
 }
 
 std::unique_ptr<TransportClientSocket>
 CustomClientSocketFactory::CreateTransportClientSocket(
     const AddressList& addresses,
+    handles::NetworkHandle target_network,
     std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
     NetworkQualityEstimator* network_quality_estimator,
     NetLog* net_log,
@@ -619,8 +639,13 @@ CustomClientSocketFactory::CreateTransportClientSocket(
   if (!tcp_dialer_) {
     return ClientSocketFactory::GetDefaultFactory()
         ->CreateTransportClientSocket(
-            addresses, std::move(socket_performance_watcher),
+            addresses, target_network, std::move(socket_performance_watcher),
             network_quality_estimator, net_log, source);
+  }
+
+  if (target_network != handles::kInvalidNetworkHandle) {
+    return std::make_unique<FailingTransportClientSocket>(
+        ERR_NOT_IMPLEMENTED, addresses, net_log, source);
   }
 
   int last_error = ERR_NAME_NOT_RESOLVED;

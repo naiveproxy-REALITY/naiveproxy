@@ -8,6 +8,7 @@
 #include <optional>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -693,6 +694,10 @@ class CustomRootSystemTrustStore : public net::SystemTrustStore {
 
   int64_t chrome_root_store_version() const override { return 0; }
 
+  std::optional<base::Time> signer_set_timestamp() const override {
+    return std::nullopt;
+  }
+
   std::optional<base::Time> mtc_metadata_update_time() const override {
     return std::nullopt;
   }
@@ -705,6 +710,20 @@ class CustomRootSystemTrustStore : public net::SystemTrustStore {
   const net::TrustStoreChrome::MtcAnchorExtraData* GetMTCAnchorData(
       base::span<const uint8_t> log_id) const override {
     return nullptr;
+  }
+
+  std::optional<bssl::VerifyCertificateChainDelegate::MTCCosigner>
+  GetMtcMirrorKey(base::span<const uint8_t> cosigner_id) const override {
+    return std::nullopt;
+  }
+
+  bool IsMtcCosignerPolicySatisfied(
+      const bssl::ParsedCertificate& target_cert,
+      base::Time current_time,
+      const bssl::MTCAnchor* mtc_anchor,
+      base::span<const std::vector<uint8_t>> valid_additional_cosigners,
+      const net::NetLogWithSource& net_log) const override {
+    return false;
   }
 
   std::optional<int32_t> GetCrsRootIdForCert(
@@ -743,6 +762,24 @@ class FixedCertVerifyProcFactory : public net::CertVerifyProcFactory {
 
  private:
   scoped_refptr<net::CertVerifyProc> verify_proc_;
+};
+
+class CustomRootCertVerifier : public net::MultiThreadedCertVerifier {
+ public:
+  CustomRootCertVerifier(
+      scoped_refptr<net::CertVerifyProc> verify_proc,
+      scoped_refptr<net::CertVerifyProcFactory> verify_proc_factory,
+      std::vector<std::vector<uint8_t>> trust_anchor_ids)
+      : net::MultiThreadedCertVerifier(std::move(verify_proc),
+                                      std::move(verify_proc_factory)),
+        trust_anchor_ids_(std::move(trust_anchor_ids)) {}
+
+  std::vector<std::vector<uint8_t>> GetTrustAnchorIDs() const override {
+    return trust_anchor_ids_;
+  }
+
+ private:
+  const std::vector<std::vector<uint8_t>> trust_anchor_ids_;
 };
 
 }  // namespace
@@ -793,6 +830,12 @@ CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
     }
   }
 
+  std::vector<std::vector<uint8_t>> trust_anchor_ids;
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  trust_anchor_ids =
+      net::TrustStoreChrome::GetTrustAnchorIDsForTrustStore(*trust_store);
+#endif
+
   // Create the SystemTrustStore with only custom roots
   auto system_trust_store =
       std::make_unique<CustomRootSystemTrustStore>(std::move(trust_store));
@@ -815,8 +858,9 @@ CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
       base::MakeRefCounted<FixedCertVerifyProcFactory>(verify_proc);
 
   // Create the MultiThreadedCertVerifier with both verify_proc and factory
-  auto* verifier = new net::MultiThreadedCertVerifier(
-      std::move(verify_proc), std::move(verify_proc_factory));
+  auto* verifier = new CustomRootCertVerifier(
+      std::move(verify_proc), std::move(verify_proc_factory),
+      std::move(trust_anchor_ids));
 
   return verifier;
 }

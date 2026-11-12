@@ -5,6 +5,8 @@
 #ifndef NET_CERT_CERT_VERIFIER_H_
 #define NET_CERT_CERT_VERIFIER_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <string>
 #include <string_view>
@@ -215,6 +217,13 @@ class NET_EXPORT CertVerifier {
 
   // Remove an observer added with AddObserver().
   virtual void RemoveObserver(Observer* observer) = 0;
+
+  // Returns classic TLS Trust Anchor IDs associated with explicitly configured
+  // roots, if known. Standalone Cronet uses these when replacing its default
+  // verifier; an arbitrary verifier must not advertise the Chrome root set.
+  virtual std::vector<std::vector<uint8_t>> GetTrustAnchorIDs() const {
+    return {};
+  }
 
   // Creates a CertVerifier implementation that verifies certificates using
   // the preferred underlying cryptographic libraries.  |cert_net_fetcher| may

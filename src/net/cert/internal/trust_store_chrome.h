@@ -429,6 +429,11 @@ class NET_EXPORT TrustStoreChrome : public bssl::TrustStore {
   GetTrustAnchorIDsFromCompiledInRootStore(
       base::span<const ChromeRootCertInfo> cert_list_for_testing = {});
 
+  // Returns compiled-in classic IDs whose certificates are trusted, by exact
+  // DER match, in an explicitly configured trust store.
+  static std::vector<std::vector<uint8_t>> GetTrustAnchorIDsForTrustStore(
+      bssl::TrustStoreInMemory& trust_store);
+
   // Returns the list of MTC CA IDs from the compiled-in root store.
   // If |anchor_list_for_testing| is non-empty, it will override the
   // compiled-in production root store.

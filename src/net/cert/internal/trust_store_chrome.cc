@@ -725,6 +725,27 @@ TrustStoreChrome::GetTrustAnchorIDsFromCompiledInRootStore(
 
 // static
 std::vector<std::vector<uint8_t>>
+TrustStoreChrome::GetTrustAnchorIDsForTrustStore(
+    bssl::TrustStoreInMemory& trust_store) {
+  std::vector<std::vector<uint8_t>> trust_anchor_ids;
+  for (const auto& anchor : kChromeRootCertList) {
+    if (anchor.trust_anchor_id.empty()) {
+      continue;
+    }
+    bssl::CertErrors errors;
+    auto parsed = bssl::ParsedCertificate::Create(
+        x509_util::CreateCryptoBufferFromStaticDataUnsafe(anchor.root_cert_der),
+        x509_util::DefaultParseCertificateOptions(), &errors);
+    CHECK(parsed);
+    if (trust_store.GetTrust(parsed.get()).IsTrustAnchor()) {
+      trust_anchor_ids.emplace_back(base::ToVector(anchor.trust_anchor_id));
+    }
+  }
+  return trust_anchor_ids;
+}
+
+// static
+std::vector<std::vector<uint8_t>>
 TrustStoreChrome::GetTrustedMtcCaIDsFromCompiledInRootStore() {
   return GetTrustedMtcCaIDsFromCompiledInRootStore(
       ChromeRootStoreSignerSet::CreateFromCompiled());

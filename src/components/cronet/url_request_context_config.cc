@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/containers/extend.h"
 #include "base/feature_list.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -23,12 +24,14 @@
 #include "components/cronet/cronet_proxy_delegate.h"
 #include "net/base/address_family.h"
 #include "net/base/cronet_buildflags.h"
+#include "net/base/features.h"
 #include "net/base/ip_address.h"
 #include "net/base/url_util.h"
 #include "net/cert/caching_cert_verifier.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/multi_threaded_cert_verifier.h"
+#include "net/cert/x509_util.h"
 #include "net/dns/context_host_resolver.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
@@ -39,6 +42,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
 #include "net/log/net_log.h"
+#include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/quic/set_quic_flag.h"
 #include "net/socket/client_socket_pool_manager.h"
@@ -53,6 +57,10 @@
 #include "net/third_party/quiche/src/quiche/quic/core/quic_types.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "url/origin.h"
+
+#if BUILDFLAG(CHROME_ROOT_STORE_ONLY)
+#include "net/cert/internal/trust_store_chrome.h"
+#endif
 
 #if BUILDFLAG(ENABLE_REPORTING)
 #include "net/reporting/reporting_policy.h"
@@ -1108,11 +1116,41 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
   if (strict_ech || reality) {
     // Apply after experimental options so QUIC cannot bypass TCP authentication.
     session_params.enable_quic = false;
-    context_builder->set_ssl_config_service(
-        std::make_unique<net::SSLConfigServiceDefaults>(
-            strict_ech ? net::EchMode::kStrict : net::EchMode::kOpportunistic,
-            reality));
   }
+
+  // The standalone engine has no browser SSLConfigServiceManager to populate
+  // Trust Anchor IDs. Derive them from the same roots used for verification,
+  // including explicit PEM stores, before transferring the custom verifier.
+  net::SSLContextConfig ssl_context_config;
+  if (base::FeatureList::IsEnabled(net::features::kTLSTrustAnchorIDs)) {
+    std::vector<std::vector<uint8_t>> trust_anchor_ids;
+    if (base::FeatureList::IsEnabled(net::features::kNonMtcTrustAnchorIDs)) {
+      if (mock_cert_verifier) {
+        trust_anchor_ids = mock_cert_verifier->GetTrustAnchorIDs();
+      }
+#if BUILDFLAG(CHROME_ROOT_STORE_ONLY)
+      else {
+        trust_anchor_ids =
+            net::TrustStoreChrome::GetTrustAnchorIDsFromCompiledInRootStore();
+      }
+#endif
+    }
+#if BUILDFLAG(CHROME_ROOT_STORE_ONLY)
+    if (!mock_cert_verifier &&
+        base::FeatureList::IsEnabled(net::features::kVerifyMTCs)) {
+      base::Extend(
+          trust_anchor_ids,
+          net::TrustStoreChrome::GetTrustedMtcCaIDsFromCompiledInRootStore());
+    }
+#endif
+    ssl_context_config.trust_anchor_ids =
+        net::x509_util::EncodeTlsRequestedTrustAnchorIDList(
+            std::move(trust_anchor_ids));
+  }
+  context_builder->set_ssl_config_service(
+      std::make_unique<net::SSLConfigServiceDefaults>(
+          strict_ech ? net::EchMode::kStrict : net::EchMode::kOpportunistic,
+          reality, std::move(ssl_context_config)));
 
   context_builder->set_http_network_session_params(session_params);
   context_builder->set_quic_context(std::move(quic_context));

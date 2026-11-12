@@ -29,7 +29,8 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
   // Cronet fixes this policy for the lifetime of an engine.
   explicit SSLConfigServiceDefaults(EchMode ech_mode);
   SSLConfigServiceDefaults(EchMode ech_mode,
-                          std::optional<RealityConfig> reality);
+                          std::optional<RealityConfig> reality,
+                          SSLContextConfig ssl_context_config = {});
 
   SSLConfigServiceDefaults(const SSLConfigServiceDefaults&) = delete;
   SSLConfigServiceDefaults& operator=(const SSLConfigServiceDefaults&) = delete;

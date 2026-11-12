@@ -15,7 +15,9 @@ Integration changes for this release:
   CertificateVerify, Finished, and camouflage-connection verification.
 - Allocate `ERR_REALITY_AUTHENTICATION_FAILED` as `-10000`; Chromium now uses
   its previous value, `-189`, for `ERR_CONTROL_MSG_TOO_BIG`.
-- Preserve the downstream Chrome Root Store v43 and certificate distrust policy.
+- Use Chrome Root Store v45 and preserve the certificate distrust policy.
+- Populate ClientHello Trust Anchor IDs from the verification roots, including
+  the matching subset when an explicit PEM root store is selected.
 - Restore the two Chromium i18n generators required by the updated prefs types,
   using their ICU-independent targets for standalone Cronet.
 - Download Chromium 154's separate Android compiler-rt package even when the
@@ -23,3 +25,15 @@ Integration changes for this release:
 
 Build and regression-test this source through the parent cronet-go repository.
 The Go bindings and native library must come from the same integration revision.
+
+## Root-store snapshot
+
+The classic root-store data (`root_store.textproto`, `root_store.certs`,
+`additional.certs`, and `root_store.md`) is synchronized from Chromium commit
+`3f600389c807d0fa50d1c0fed9024e53910f9338`, fetched on 2026-11-12. The upstream
+store version is 45. Its protobuf metadata and certificate bundles are kept
+together so constraints, certificates, and advertised IDs refer to one snapshot.
+
+Chromium 154's default `TLSTrustAnchorIDs` and `NonMtcTrustAnchorIDs` policies
+apply. MTC verification remains disabled by default; its separate signer data
+uses the Chromium 154-compatible schema.

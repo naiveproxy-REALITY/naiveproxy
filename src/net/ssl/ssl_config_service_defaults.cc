@@ -15,8 +15,12 @@ SSLConfigServiceDefaults::SSLConfigServiceDefaults(EchMode ech_mode)
 SSLConfigServiceDefaults::~SSLConfigServiceDefaults() = default;
 
 SSLConfigServiceDefaults::SSLConfigServiceDefaults(
-    EchMode ech_mode, std::optional<RealityConfig> reality)
-    : ech_mode_(ech_mode), reality_(reality) {}
+    EchMode ech_mode,
+    std::optional<RealityConfig> reality,
+    SSLContextConfig ssl_context_config)
+    : default_config_(std::move(ssl_context_config)),
+      ech_mode_(ech_mode),
+      reality_(std::move(reality)) {}
 
 const RealityConfig* SSLConfigServiceDefaults::GetRealityConfig() const {
   return reality_ ? &*reality_ : nullptr;
