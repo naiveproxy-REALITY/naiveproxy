@@ -181,8 +181,9 @@ QuicSession::QuicSession(
           connection->version().IsIetfQuic() ? 0
                                              : kMinimumFlowControlSendWindow,
           config.GetInitialSessionFlowControlWindowToSend(),
-          kSessionReceiveWindowLimit, /*should_auto_tune_receive_window=*/true,
-          nullptr),
+          std::max(kSessionReceiveWindowLimit,
+                   config.GetInitialSessionFlowControlWindowToSend()),
+          /*should_auto_tune_receive_window=*/true, nullptr),
       control_frame_manager_(this),
       datagram_queue_(this, std::move(datagram_observer)),
       is_configured_(false),

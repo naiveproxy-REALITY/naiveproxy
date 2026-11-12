@@ -147,6 +147,7 @@ The first CONNECT request to a server cannot use "Fast Open" to send payload bef
   - Files in the first available directory of
     -  /etc/ssl/certs (SLES10/SLES11, https://golang.org/issue/12139)
     -  /etc/pki/tls/certs (Fedora/RHEL)
+    -  /apex/com.android.conscrypt/cacerts (preferred on Android 14 and later)
     -  /system/etc/security/cacerts (Android)
 - Handle AIA response in PKCS#7 format
 - Allow higher socket limits for proxies

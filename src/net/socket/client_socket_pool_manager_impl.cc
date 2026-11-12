@@ -89,7 +89,8 @@ ClientSocketPool* ClientSocketPoolManagerImpl::GetSocketPool(
     new_pool = std::make_unique<TransportClientSocketPool>(
         sockets_per_proxy_chain, sockets_per_group,
         unused_idle_socket_timeout(pool_type_), proxy_chain,
-        pool_type_ == HttpNetworkSession::SocketPoolType::kWebSocket,
+        /*is_for_websockets=*/pool_type_ ==
+            HttpNetworkSession::SocketPoolType::kWebSocket,
         &common_connect_job_params_, cleanup_on_ip_address_change_);
   }
 

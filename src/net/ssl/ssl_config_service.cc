@@ -88,6 +88,10 @@ SSLConfigService::SSLConfigService()
 
 SSLConfigService::~SSLConfigService() = default;
 
+const RealityConfig* SSLConfigService::GetRealityConfig() const {
+  return nullptr;
+}
+
 void SSLConfigService::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
 }

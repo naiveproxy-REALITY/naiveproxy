@@ -17,6 +17,8 @@
 
 namespace net {
 
+struct RealityConfig;
+
 // Represents a given named group in TLS, used in supported_groups and
 // key_share.
 struct NET_EXPORT SSLNamedGroupInfo {
@@ -135,6 +137,8 @@ class NET_EXPORT SSLConfigService {
 
   // Returns the host-specific EchMode for `hostname`.
   virtual EchMode GetEchMode(std::string_view hostname) const = 0;
+
+  virtual const RealityConfig* GetRealityConfig() const;
 
   // Returns true if connections to |hostname| can reuse, or are permitted to
   // reuse, connections on which a client cert has been negotiated. Note that

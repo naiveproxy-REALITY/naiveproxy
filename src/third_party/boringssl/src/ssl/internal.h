@@ -942,6 +942,11 @@ class SSLKeyShare {
   // DeserializePrivateKey initializes the state of the key exchange from `in`,
   // returning true if successful and false otherwise.
   virtual bool DeserializePrivateKey(CBS *in) { return false; }
+
+  // Computes REALITY authentication without consuming the TLS key exchange.
+  virtual bool DeriveRealitySecret(uint8_t out[32], const uint8_t peer[32]) {
+    return false;
+  }
 };
 
 struct NamedGroup {
@@ -1896,6 +1901,8 @@ struct SSL_HANDSHAKE {
   // key_shares are the current key exchange instances, in preference order. Any
   // members of this vector must be non-null.
   InplaceVector<UniquePtr<SSLKeyShare>, kNumNamedGroups> key_shares;
+
+  Array<uint8_t> reality_auth_key;
 
   // pre_shared_keys are the pre-shared keys to be offered by the client.
   Vector<SSLPreSharedKey> pre_shared_keys;
@@ -3552,6 +3559,9 @@ struct SSL_CONFIG {
   // client_ech_config_list, if not empty, is a serialized ECHConfigList
   // structure for the client to use when negotiating ECH.
   Array<uint8_t> client_ech_config_list;
+
+  // REALITY client public key followed by the eight-byte short ID.
+  Array<uint8_t> reality_config;
 
   // compliance_policy limits the set of ciphers that can be selected when
   // negotiating a TLS 1.3 connection.

@@ -6,10 +6,12 @@
 #define NET_SSL_SSL_CONFIG_SERVICE_DEFAULTS_H_
 
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "net/base/net_export.h"
 #include "net/ssl/ech_mode_getter.h"
+#include "net/ssl/reality_config.h"
 #include "net/ssl/ssl_config_service.h"
 
 namespace net {
@@ -24,6 +26,11 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
   explicit SSLConfigServiceDefaults(
       std::unique_ptr<EchModeGetter> ech_mode_getter = nullptr);
 
+  // Cronet fixes this policy for the lifetime of an engine.
+  explicit SSLConfigServiceDefaults(EchMode ech_mode);
+  SSLConfigServiceDefaults(EchMode ech_mode,
+                          std::optional<RealityConfig> reality);
+
   SSLConfigServiceDefaults(const SSLConfigServiceDefaults&) = delete;
   SSLConfigServiceDefaults& operator=(const SSLConfigServiceDefaults&) = delete;
 
@@ -31,9 +38,10 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
 
   // Returns the default SSL config settings.
   SSLContextConfig GetSSLContextConfig() override;
+  const RealityConfig* GetRealityConfig() const override;
 
   // If `ech_mode_getter_` is provided, EchMode is queried from it;
-  // otherwise, the default `kOpportunistic` is returned.
+  // otherwise, the engine's fixed policy (default kOpportunistic) is returned.
   EchMode GetEchMode(std::string_view hostname) const override;
 
   bool CanShareConnectionWithClientCerts(
@@ -44,6 +52,8 @@ class NET_EXPORT SSLConfigServiceDefaults : public SSLConfigService {
   const SSLContextConfig default_config_;
 
   std::unique_ptr<EchModeGetter> ech_mode_getter_;
+  const EchMode ech_mode_ = EchMode::kOpportunistic;
+  const std::optional<RealityConfig> reality_;
 };
 
 }  // namespace net

@@ -409,11 +409,13 @@ bool WriteRootCppFile(const RootStore& root_store,
   string_to_write += "};\n\n";
 
   // Write constants used by MTC anchors.
+  bool has_trusted_mtc_anchor = false;
   for (int i = 0; i < root_store.mtc_anchors_size(); i++) {
     const auto& anchor = root_store.mtc_anchors(i);
     if (!anchor.tls_trust_anchor()) {
       continue;
     }
+    has_trusted_mtc_anchor = true;
     WriteByteArrayConstant(base::StringPrintf("kMtcAnchorLogId%d", i),
                            anchor.log_id(), &string_to_write);
     MaybeWriteConstraintsConstant(
@@ -421,28 +423,35 @@ bool WriteRootCppFile(const RootStore& root_store,
         &string_to_write);
   }
 
-  // Assemble list of trusted MTC anchors.
-  string_to_write +=
-      "constexpr ChromeMtcAnchorInfo kChromeTrustedMtcAnchorList[] = {\n";
-  for (int i = 0; i < root_store.mtc_anchors_size(); i++) {
-    const auto& anchor = root_store.mtc_anchors(i);
-    if (!anchor.tls_trust_anchor()) {
-      continue;
+  // Assemble list of trusted MTC anchors. An empty C-style array is a Clang
+  // extension and cannot be used consistently in span and range expressions.
+  if (!has_trusted_mtc_anchor) {
+    string_to_write +=
+        "constexpr base::span<const ChromeMtcAnchorInfo> "
+        "kChromeTrustedMtcAnchorList;\n\n";
+  } else {
+    string_to_write +=
+        "constexpr ChromeMtcAnchorInfo kChromeTrustedMtcAnchorList[] = {\n";
+    for (int i = 0; i < root_store.mtc_anchors_size(); i++) {
+      const auto& anchor = root_store.mtc_anchors(i);
+      if (!anchor.tls_trust_anchor()) {
+        continue;
+      }
+      base::StringAppendF(&string_to_write, "  {kMtcAnchorLogId%d", i);
+      if (anchor.constraints().size() > 0) {
+        base::StringAppendF(&string_to_write, ", kMtcAnchorConstraints%d", i);
+      } else {
+        string_to_write += ", {}";
+      }
+      if (anchor.has_crs_root_id()) {
+        base::StringAppendF(&string_to_write, ", %d", anchor.crs_root_id());
+      } else {
+        string_to_write += ", std::nullopt";
+      }
+      string_to_write += "},\n";
     }
-    base::StringAppendF(&string_to_write, "  {kMtcAnchorLogId%d", i);
-    if (anchor.constraints().size() > 0) {
-      base::StringAppendF(&string_to_write, ", kMtcAnchorConstraints%d", i);
-    } else {
-      string_to_write += ", {}";
-    }
-    if (anchor.has_crs_root_id()) {
-      base::StringAppendF(&string_to_write, ", %d", anchor.crs_root_id());
-    } else {
-      string_to_write += ", std::nullopt";
-    }
-    string_to_write += "},\n";
+    string_to_write += "};\n\n";
   }
-  string_to_write += "};\n\n";
 
   base::StringAppendF(&string_to_write,
                       "\nstatic const int64_t kRootStoreVersion = %" PRId64

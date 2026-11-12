@@ -1158,6 +1158,11 @@ NET_ERROR(BLOB_REFERENCED_BLOB_BROKEN, -905)
 // renderer trying to create the blob.
 NET_ERROR(BLOB_REFERENCED_FILE_UNAVAILABLE, -906)
 
+// Downstream Cronet errors use a separate range from Chromium's error codes.
+// TLS authenticated the camouflage site, but REALITY authentication failed.
+// The connected socket is reserved for an independent camouflage request.
+NET_ERROR(REALITY_AUTHENTICATION_FAILED, -10000)
+
 // CAUTION: Before adding errors here, please check the ranges of errors written
 // in the top of this file.
 

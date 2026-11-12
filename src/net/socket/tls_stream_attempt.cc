@@ -275,6 +275,12 @@ int TlsStreamAttempt::DoTlsAttemptComplete(int rv) {
   mutable_connect_timing().ssl_end = base::TimeTicks::Now();
   tls_handshake_timeout_timer_.Stop();
 
+  if (rv == ERR_REALITY_AUTHENTICATION_FAILED) {
+    params().ssl_client_context->StartRealityFallback(
+        std::move(ssl_socket_), host_port_pair_, connect_timing());
+    return rv;
+  }
+
   const bool ech_enabled =
       IsEchEnabled(params().ssl_client_context, host_port_pair_.host());
 
