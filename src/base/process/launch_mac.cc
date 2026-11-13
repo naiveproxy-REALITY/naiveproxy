@@ -66,6 +66,7 @@ int posix_spawnattr_set_csm_np(const posix_spawnattr_t*, uint32_t)
 #endif  // TARGET_OS_SIMULATOR
 #endif  // BUILDFLAG(IS_IOS_TVOS)
 
+#include <Availability.h>
 #include <crt_externs.h>
 #include <mach/mach.h>
 #include <spawn.h>
@@ -160,11 +161,13 @@ class PosixSpawnFileActions {
 
 #if BUILDFLAG(IS_MAC)
   void Chdir(const char* path) {
+#if defined(__MAC_26_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_26_0
     if (__builtin_available(macOS 26, *)) {
       DPSXCHECK(posix_spawn_file_actions_addchdir(&file_actions_, path));
-    } else {
-      DPSXCHECK(posix_spawn_file_actions_addchdir_np(&file_actions_, path));
+      return;
     }
+#endif
+    DPSXCHECK(posix_spawn_file_actions_addchdir_np(&file_actions_, path));
   }
 #endif
 

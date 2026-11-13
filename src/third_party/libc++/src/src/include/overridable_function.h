@@ -63,7 +63,10 @@
 
 #  define _LIBCPP_CAN_DETECT_OVERRIDDEN_FUNCTION 1
 
-#  if !__has_feature(ptrauth_calls)
+// MIPS GOT16 relocations for the assembly-defined local alias can lose the
+// matching LO16 adjustment, comparing a page address with the actual function.
+// Use section bounds on MIPS as well as pointer-authenticated targets.
+#  if !__has_feature(ptrauth_calls) && !defined(__mips__)
 
 #    define OVERRIDABLE_FUNCTION [[gnu::weak]]
 
@@ -112,9 +115,12 @@ _LIBCPP_HIDE_FROM_ABI inline bool __is_function_overridden() noexcept {
 
 _LIBCPP_END_NAMESPACE_STD
 
-#  else // __has_feature(ptrauth_calls)
+#  else // __has_feature(ptrauth_calls) || defined(__mips__)
 
-#    include <ptrauth.h>
+#    include <cstdint>
+#    if __has_feature(ptrauth_calls)
+#      include <ptrauth.h>
+#    endif
 
 #    if defined(_LIBCPP_OBJECT_FORMAT_MACHO)
 #      define OVERRIDABLE_FUNCTION [[gnu::weak, gnu::section("__TEXT,__lcxx_override,regular,pure_instructions")]]
@@ -140,18 +146,20 @@ _LIBCPP_HIDE_FROM_ABI inline bool __is_function_overridden() noexcept {
   uintptr_t __end   = reinterpret_cast<uintptr_t>(&__stop___lcxx_override);
   uintptr_t __ptr   = reinterpret_cast<uintptr_t>(_Func);
 
+#    if __has_feature(ptrauth_calls)
   // We must pass a void* to ptrauth_strip since it only accepts a pointer type. Also, in particular,
   // we must NOT pass a function pointer, otherwise we will strip the function pointer, and then attempt
   // to authenticate and re-sign it when casting it to a uintptr_t again, which will fail because we just
   // stripped the function pointer. See rdar://122927845.
   __ptr = reinterpret_cast<uintptr_t>(ptrauth_strip(reinterpret_cast<void*>(__ptr), ptrauth_key_function_pointer));
+#    endif
 
   // Finally, the function was overridden if it falls outside of the section's bounds.
-  return __ptr < __start || __ptr > __end;
+  return __ptr < __start || __ptr >= __end;
 }
 _LIBCPP_END_NAMESPACE_STD
 
-#  endif // __has_feature(ptrauth_calls)
+#  endif // __has_feature(ptrauth_calls) || defined(__mips__)
 
 #else // defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__))
 

@@ -22,6 +22,11 @@ Integration changes for this release:
   using their ICU-independent targets for standalone Cronet.
 - Keep URLRequest independent of the Android Java PCC audit logger: the
   standalone C API is initialized without a JVM or generated Java bindings.
+- Use libc++'s section-boundary override detection on MIPS, where local inline
+  assembly aliases can produce unpaired GOT16 relocations and false assertions
+  in `operator new(..., std::nothrow)`. Actual overrides remain detectable.
+- Guard macOS 26's standardized spawn chdir API by SDK availability, retaining
+  the existing `_np` fallback for older SDKs and deployment targets.
 - Download Chromium 154's separate Android compiler-rt package even when the
   desktop compiler was already cached.
 
