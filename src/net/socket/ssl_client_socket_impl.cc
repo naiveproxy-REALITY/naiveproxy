@@ -847,12 +847,14 @@ int SSLClientSocketImpl::Init() {
       ssl_.get(),
       base::FeatureList::IsEnabled(features::kUseNewAlpsCodepointHttp2));
 
-  if (!ssl_config_.alpn_protos.empty()) {
-    std::vector<uint8_t> wire_protos =
-        SerializeNextProtos(ssl_config_.alpn_protos);
+  const auto& alpn_protos = context_->config().alpn_protos
+                                ? *context_->config().alpn_protos
+                                : ssl_config_.alpn_protos;
+  if (!alpn_protos.empty()) {
+    std::vector<uint8_t> wire_protos = SerializeNextProtos(alpn_protos);
     SSL_set_alpn_protos(ssl_.get(), wire_protos.data(), wire_protos.size());
 
-    for (NextProto proto : ssl_config_.alpn_protos) {
+    for (NextProto proto : alpn_protos) {
       auto iter = ssl_config_.application_settings.find(proto);
       if (iter != ssl_config_.application_settings.end()) {
         const char* proto_string = NextProtoToString(proto);
@@ -1004,17 +1006,29 @@ int SSLClientSocketImpl::DoHandshakeComplete(int result) {
 
   const uint8_t* alpn_proto = nullptr;
   unsigned alpn_len = 0;
+  const auto& alpn_protos = context_->config().alpn_protos
+                                ? *context_->config().alpn_protos
+                                : ssl_config_.alpn_protos;
   SSL_get0_alpn_selected(ssl_.get(), &alpn_proto, &alpn_len);
   if (alpn_len > 0) {
     std::string_view proto(reinterpret_cast<const char*>(alpn_proto), alpn_len);
     negotiated_protocol_ = NextProtoFromString(proto);
   } else if (reality_authenticated_ &&
-             std::ranges::contains(ssl_config_.alpn_protos,
-                                   NextProto::kProtoHTTP2)) {
+             std::ranges::contains(alpn_protos, NextProto::kProtoHTTP2)) {
     // sing-box's REALITY server omits ALPN. This engine targets a configured
     // HTTP/2 endpoint, so use h2 with prior knowledge after authentication.
     // An explicit server ALPN selection always takes precedence.
     negotiated_protocol_ = NextProto::kProtoHTTP2;
+  }
+
+  if (context_->config().alpn_protos) {
+    // No ALPN is the HTTP/1.1 default only when the application allowed it.
+    auto protocol = negotiated_protocol_ == NextProto::kProtoUnknown
+                        ? NextProto::kProtoHTTP11
+                        : negotiated_protocol_;
+    if (!std::ranges::contains(alpn_protos, protocol)) {
+      return ERR_ALPN_NEGOTIATION_FAILED;
+    }
   }
 
   RecordNegotiatedProtocol();

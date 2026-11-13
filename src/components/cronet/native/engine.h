@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
@@ -59,6 +60,7 @@ class Cronet_EngineImpl : public Cronet_Engine {
   Cronet_RESULT CheckResult(Cronet_RESULT result);
 
   bool SetStrictECH(bool enabled) LOCKS_EXCLUDED(lock_);
+  bool SetALPN(const char* protocols) LOCKS_EXCLUDED(lock_);
   bool SetReality(const uint8_t* public_key, const uint8_t* short_id)
       LOCKS_EXCLUDED(lock_);
 
@@ -112,6 +114,7 @@ class Cronet_EngineImpl : public Cronet_Engine {
   // Synchronize access to member variables from different threads.
   base::Lock lock_;
   bool strict_ech_ GUARDED_BY(lock_) = false;
+  std::vector<std::string> alpn_protocols_ GUARDED_BY(lock_);
   std::optional<net::RealityConfig> reality_ GUARDED_BY(lock_);
   // Cronet URLRequest context used for all network operations.
   std::unique_ptr<CronetContext> context_;

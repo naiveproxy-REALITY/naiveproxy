@@ -1122,6 +1122,25 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
   // Trust Anchor IDs. Derive them from the same roots used for verification,
   // including explicit PEM stores, before transferring the custom verifier.
   net::SSLContextConfig ssl_context_config;
+  if (!alpn_protocols.empty()) {
+    // Apply explicit protocol selection after experiments so cached Alt-Svc or
+    // DNS protocol hints cannot override the application's transport choice.
+    session_params.enable_quic =
+        alpn_protocols == std::vector<std::string>{"h3"};
+    session_params.enable_http2 = false;
+    if (session_params.enable_quic) {
+      quic_context->params()->force_quic_everywhere = true;
+    } else {
+      session_params.alpn_protos.emplace();
+      for (const auto& protocol : alpn_protocols) {
+        auto next_proto = net::NextProtoFromString(protocol);
+        session_params.alpn_protos->push_back(next_proto);
+        session_params.enable_http2 |=
+            next_proto == net::NextProto::kProtoHTTP2;
+      }
+      ssl_context_config.alpn_protos = session_params.alpn_protos;
+    }
+  }
   if (base::FeatureList::IsEnabled(net::features::kTLSTrustAnchorIDs)) {
     std::vector<std::vector<uint8_t>> trust_anchor_ids;
     if (base::FeatureList::IsEnabled(net::features::kNonMtcTrustAnchorIDs)) {

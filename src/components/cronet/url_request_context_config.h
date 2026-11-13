@@ -186,6 +186,7 @@ struct URLRequestContextConfig {
 
   // Fixed before engine startup; applies to all connections and retries.
   bool strict_ech = false;
+  std::vector<std::string> alpn_protocols;
   std::optional<net::RealityConfig> reality;
 
   // Custom TCP dialer callback. When set, this callback will be used to

@@ -88,6 +88,8 @@ struct NET_EXPORT HttpNetworkSessionParams {
   // Use SPDY ping frames to test for connection health after idle.
   bool enable_spdy_ping_based_connection_checking = true;
   bool enable_http2 = true;
+  // Explicit ordered TCP ALPN policy, including omission of HTTP/1.1 fallback.
+  std::optional<NextProtoVector> alpn_protos;
   size_t spdy_session_max_recv_window_size;
   // Maximum number of capped frames that can be queued at any time.
   int spdy_session_max_queued_capped_frames;

@@ -220,6 +220,9 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
   }
 
   next_protos_.push_back(NextProto::kProtoHTTP11);
+  if (params_.alpn_protos) {
+    next_protos_ = *params_.alpn_protos;
+  }
 
   http_server_properties_->SetMaxServerConfigsStoredInProperties(
       context.quic_context->params()->max_server_configs_stored_in_properties);

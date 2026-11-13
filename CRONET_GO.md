@@ -29,6 +29,9 @@ Integration changes for this release:
   the existing `_np` fallback for older SDKs and deployment targets.
 - Download Chromium 154's separate Android compiler-rt package even when the
   desktop compiler was already cached.
+- Expose per-engine HTTP ALPN selection. Explicit TCP offers preserve order and
+  exclude unrequested fallback protocols; `h3` selects QUIC exclusively. Both
+  the legacy socket pools and Happy Eyeballs V3 share the policy.
 
 Build and regression-test this source through the parent cronet-go repository.
 The Go bindings and native library must come from the same integration revision.

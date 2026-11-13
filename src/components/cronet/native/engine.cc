@@ -18,6 +18,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
 #include "base/notimplemented.h"
+#include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "components/cronet/cronet_context.h"
 #include "components/cronet/cronet_global_state.h"
@@ -39,13 +40,13 @@
 #include "net/cert/multi_threaded_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
+#include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "third_party/boringssl/src/pki/cert_errors.h"
 #include "third_party/boringssl/src/pki/parse_certificate.h"
 #include "third_party/boringssl/src/pki/parsed_certificate.h"
 #include "third_party/boringssl/src/pki/trust_store_collection.h"
 #include "third_party/boringssl/src/pki/trust_store_in_memory.h"
-#include "net/url_request/url_request_context_builder.h"
-#include "net/url_request/url_request_context_getter.h"
 
 namespace {
 
@@ -260,6 +261,11 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
     return CheckResult(Cronet_RESULT_ILLEGAL_ARGUMENT);
   }
 
+  if (alpn_protocols_ == std::vector<std::string>{"h3"} &&
+      (!params->enable_quic || strict_ech_ || reality_)) {
+    return CheckResult(Cronet_RESULT_ILLEGAL_ARGUMENT);
+  }
+
   URLRequestContextConfigBuilder context_config_builder;
   context_config_builder.enable_quic = params->enable_quic;
   context_config_builder.enable_spdy = params->enable_http2;
@@ -312,6 +318,7 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
   config->strict_ech = strict_ech_;
+  config->alpn_protocols = alpn_protocols_;
   config->reality = reality_;
 
   // Set custom dialer if provided.
@@ -546,6 +553,30 @@ bool Cronet_EngineImpl::SetStrictECH(bool enabled) {
   return true;
 }
 
+bool Cronet_EngineImpl::SetALPN(const char* protocols) {
+  base::AutoLock lock(lock_);
+  if (context_ || !protocols) {
+    return false;
+  }
+  std::vector<std::string> parsed;
+  if (*protocols) {
+    parsed = base::SplitString(protocols, ",", base::KEEP_WHITESPACE,
+                               base::SPLIT_WANT_ALL);
+  }
+  std::unordered_set<std::string> seen;
+  for (const auto& protocol : parsed) {
+    if ((protocol != "h2" && protocol != "http/1.1" && protocol != "h3") ||
+        !seen.insert(protocol).second) {
+      return false;
+    }
+  }
+  if (seen.contains("h3") && parsed.size() != 1) {
+    return false;
+  }
+  alpn_protocols_ = std::move(parsed);
+  return true;
+}
+
 bool Cronet_EngineImpl::SetReality(const uint8_t* public_key,
                                  const uint8_t* short_id) {
   base::AutoLock lock(lock_);
@@ -616,6 +647,11 @@ CRONET_EXPORT Cronet_EnginePtr Cronet_Engine_Create() {
 CRONET_EXPORT bool Cronet_Engine_SetStrictECH(Cronet_EnginePtr engine,
                                             bool enabled) {
   return static_cast<cronet::Cronet_EngineImpl*>(engine)->SetStrictECH(enabled);
+}
+
+CRONET_EXPORT bool Cronet_Engine_SetALPN(Cronet_EnginePtr engine,
+                                         const char* protocols) {
+  return static_cast<cronet::Cronet_EngineImpl*>(engine)->SetALPN(protocols);
 }
 
 CRONET_EXPORT bool Cronet_Engine_SetReality(Cronet_EnginePtr engine,
