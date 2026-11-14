@@ -984,7 +984,14 @@ BASE_FEATURE_PARAM(int,
                    0);
 
 bool IsDnsPlatformSupported() {
-#if BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_ANDROID) && BUILDFLAG(CRONET_BUILD)
+  // Standalone Cronet does not install a DnsPlatformAttemptFactory. This must
+  // match its actual resolver capabilities, not just the Android API level:
+  // DnsClient::UseDnsPlatformDueToEchMode() also consults this function and
+  // otherwise overrides an explicit built-in DNS configuration for Strict ECH,
+  // leading to a null factory dereference in MakePlatformAttempt().
+  return false;
+#elif BUILDFLAG(IS_ANDROID)
   // android_res_n{query, result} are available starting from API level 29 (Q).
   // https://developer.android.com/ndk/reference/group/networking#android_res_nquery
   return base::android::android_info::sdk_int() >=

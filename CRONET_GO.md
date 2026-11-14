@@ -32,6 +32,9 @@ Integration changes for this release:
 - Expose per-engine HTTP ALPN selection. Explicit TCP offers preserve order and
   exclude unrequested fallback protocols; `h3` selects QUIC exclusively. Both
   the legacy socket pools and Happy Eyeballs V3 share the policy.
+- Report platform DNS as unavailable in standalone Android Cronet. Strict ECH
+  must retain the configured built-in DNS/socket callbacks instead of forcing
+  a platform attempt through a factory that the standalone engine never installs.
 
 Build and regression-test this source through the parent cronet-go repository.
 The Go bindings and native library must come from the same integration revision.
